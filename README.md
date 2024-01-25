@@ -9,7 +9,7 @@ O projeto foi realizado utilizando a liguagem R.
 ## Arquivos do repositório
 Este repositório possui cinco arquivos:
 <ul style="list-style:none;">
-  <li>O primeiro arquivo contém a limpeza e transformação dos dados, além da Análise Descritiva. Este arquivo possui duas versões: <a href="https://github.com/CatarinaAguiar3/Previsao-de-rotatividade-de-clientes-de-Telecomunicacoes/blob/main/1.Telecom_Limpeza_Transfomacao_Analise_Descritiva.md">markdown</a> e <a href="https://github.com/CatarinaAguiar3/Previsao-de-rotatividade-de-clientes-de-Telecomunicacoes/1.Telecom_Limpeza_Transfomacao_Analise_Descritiva.html">HTML</a></li> e <a href="https://github.com/CatarinaAguiar3/Previsao-de-rotatividade-de-clientes-de-Telecomunicacoes/1.Telecom_Limpeza_Transfomacao_Analise_Descritiva.md">markdown2</a>
+  <li>O primeiro arquivo contém a limpeza e transformação dos dados, além da Análise Descritiva. Este arquivo possui duas versões: <a href="https://github.com/CatarinaAguiar3/Previsao-de-rotatividade-de-clientes-de-Telecomunicacoes/blob/main/1.Telecom_Limpeza_Transfomacao_Analise_Descritiva.md">markdown</a> e <a href="https://catarinaaguiar3.github.io/Previsao-de-rotatividade-de-clientes-de-Telecomunicacoes/1.Telecom_Limpeza_Transfomacao_Analise_Descritiva.html">HTML</a></li>
   <li></li>
 </ul>
 
