@@ -1,0 +1,295 @@
+---
+title: "8.Marcação dos dados: Previsão de rotatividade de clientes de Telecomunicações"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+---
+
+```{r setup, include=FALSE}
+## Global options
+knitr::opts_chunk$set(cache = TRUE)
+```
+
+# Carregar os dados
+```{r, message=FALSE, warning=FALSE}
+library(dplyr)
+library(data.table)
+library(tidyr)
+library(ggplot2)
+library(tidyverse)
+library(psych) # função describe
+library(ggcorrplot) # grafico de correlação
+library(pastecs)
+library(dummy) #Criar dummy: linhas passam a ser colunas binárias 
+library(randomForest) #Usar no algoritmo Random Forest
+library(boot)#Fazer CrossValidation
+library(fastDummies) 
+library(stats) #Métrica KS
+#install.packages("ROCR")
+library(ROCR)#para fazer a curva ROC
+library(pROC)
+```
+
+```{r, message=FALSE, warning=FALSE}
+#install.packages("caret")
+#install.packages("randomForest")
+library(lattice) #necessária para usar o pacote caret
+library(caret) #Fazer avaliação dos modelos, padronizar os dados etc
+library(randomForest) 
+```
+
+
+```{r, message=FALSE, warning=FALSE}
+#SHAP VALUE
+#install.packages("kernelshap")
+#install.packages("shapviz")
+library(kernelshap)
+library(shapviz)
+
+
+library(keras)
+```
+
+
+# Carregar a base de dados
+```{r, message=FALSE, warning=FALSE}
+setwd("C:/0.Projetos/2.Telecom_customer_(Churn)/Scripts")
+df_final1 <- read.csv("df_final_modelagem.csv")
+```
+
+# Código utilizado no inicio da modelagem
+
+## Quebrar o dataset em teste, treino e validação
+```{r, message=FALSE, warning=FALSE}
+# Definindo a semente para reproduzibilidade
+set.seed(123)
+
+# Índices para amostra de treino (70% dos dados)
+indice_treino <- sample(1:nrow(df_final1), 0.7 * nrow(df_final1), replace=FALSE)
+
+# Índices para amostra de teste (15% dos dados)
+indice_teste <- sample(setdiff(1:nrow(df_final1), indice_treino), 0.15* nrow(df_final1), replace=FALSE) 
+
+# Índices para amostra de validação (15% dos dados restantes)
+indice_validacao <- setdiff(1:nrow(df_final1), c(indice_treino, indice_teste))
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Conjunto de dados dividos
+dados_treino <- df_final1[indice_treino, ]
+dados_teste <- df_final1[indice_teste, ]
+dados_validacao <- df_final1[indice_validacao, ]
+
+#OBS: Índices para amostra de treino (indices_treino): São os índices das linhas 
+#do seu conjunto de dados original que foram selecionadas para compor o conjunto 
+#de treino. Esses índices são utilizados para extrair as linhas correspondentes do
+#conjunto de dados original. Essencialmente, indices_treino são os números que indicam 
+#quais observações (linhas) do seu dataset original fazem parte do conjunto de treino
+
+```
+
+## Padronizar e Pré Processar os dados
+```{r, message=FALSE, warning=FALSE}
+# Criar um objeto de pré-processamento com base nos dados de treinamento
+preproc <- preProcess(dados_treino, method = c("range"))
+
+# Aplicar o mesmo pré-processamento aos conjuntos de treinamento, teste e validação
+dados_treino1<- predict(preproc, dados_treino)
+dados_teste1 <- predict(preproc, dados_teste)
+dados_validacao1<- predict(preproc, dados_validacao)
+
+dados_treino1 <- data.frame(dados_treino1)
+dados_teste1 <- data.frame(dados_teste1)
+dados_validacao1 <- data.frame(dados_validacao1)
+```
+
+# Marcação dos dados
+```{r, message=FALSE, warning=FALSE}
+dados_treino2 <- cbind(indice_treino,dados_treino1 )
+dados_validacao2 <- cbind(indice_validacao,dados_validacao1 )
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Tabela com dados marcados
+DT:: datatable(dados_validacao2)
+#, rownames = FALSE
+```
+
+
+# Modelo Final
+
+```{r, message=FALSE, warning=FALSE}
+set.seed(123)
+final_model <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                              mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                              totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                              peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                              avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                            data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                            mtry = 5, nodesize= 100, type = "classification", sampsize=20000 )
+
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Previsão
+pred<- predict(final_model, newdata = dados_validacao2, type = "response")
+```
+
+# Shap Value
+```{r}
+#https://stackoverflow.com/questions/65391767/shap-plots-for-random-forest-models
+#https://www.r-bloggers.com/2022/06/visualize-shap-values-without-tears/
+#https://rdrr.io/cran/kernelshap/man/kernelshap.html
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Etapa 1: Criar uma amostra aleatoria
+set.seed(123)  # Definindo uma semente para reproducibilidade
+amostra <- dados_treino1[sample(nrow(dados_treino1), 200), ]
+```
+
+```{r, message=FALSE, warning=FALSE}
+# Etapa 2: Calcular os valores SHAP do kernel 
+# bg_X geralmente é um subconjunto pequeno (50-200 linhas) dos dados
+#s <- kernelshap(final_model, dados_treino1[-1], bg_X = amostra)
+
+#Salvar o resultado
+setwd("C:/0.Projetos/2.Telecom_customer_(Churn)/Scripts")
+#saveRDS(s, file = "resultado_kernelshap.rds")
+s1 <- readRDS("resultado_kernelshap.rds")
+
+```
+
+
+```{r}
+#Tabela com os valores Shap Value
+#DT:: datatable(s1$S)
+```
+
+
+```{r}
+#Matriz ou Data.frame com linhas a serem explicadas.
+#DT::datatable(s1$X)
+```
+
+
+
+```{r, message=FALSE, warning=FALSE}
+# Etapa 3: Transforme-os em um objeto shapviz
+sv <- shapviz(s1) 
+```
+
+## Gráfico 1
+```{r, message=FALSE, warning=FALSE}
+#Gráfico 1
+sv_importance(sv, kind = "bee")
+```
+
+## Gráfico 2
+```{r, message=FALSE, warning=FALSE}
+#Gráfico 2
+sv_dependence(sv, v = "eqpdays", color_var = "auto")
+```
+
+## Gráfico 3
+```{r, message=FALSE, warning=FALSE}
+#Gráfico 3 
+sv_importance(sv)
+#ou
+#sv_importance(sv, kind = "bar")
+```
+
+## Gráfico 4
+```{r, message=FALSE, warning=FALSE}
+#Gráfico 4
+sv_importance(sv, kind = "both")
+```
+
+## Gráfico 5
+```{r, message=FALSE, warning=FALSE}
+#Gráfico 5
+sv_waterfall ( sv, row_id = 1 )
+```
+## Grafico 6
+```{r, message=FALSE, warning=FALSE}
+# Gráfico 6
+sv_force (sv, row_id = 1)
+
+```
+
+# Tabela para simulação da faixa de corte e do desconto
+```{r, message=FALSE, warning=FALSE}
+#Criar Tabela
+tabela<- dados_validacao2 %>% 
+  select(indice_validacao,churn)
+
+tabela1 <- cbind(tabela, pred)
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Tabela 2 - Faixas de corte para valores previstos
+tabela2 <- tabela1  %>% mutate(
+  f1_pred = ifelse(pred<= 0.05,1, 0),
+  f2_pred = ifelse(0.05< pred & pred<= 0.1, 1,0),
+  f3_pred = ifelse(0.1< pred & pred<= 0.15,1, 0),
+  f4_pred = ifelse(0.15< pred & pred<= 0.2,1, 0),
+  f5_pred = ifelse(0.2 < pred & pred <= 0.25,1, 0),
+  f6_pred = ifelse(0.25 < pred & pred <= 0.3,1, 0),
+  f7_pred = ifelse(0.3 < pred & pred <= 0.35,1, 0),
+  f8_pred = ifelse(0.35 < pred & pred <= 0.4,1, 0),
+  f9_pred = ifelse(0.4 < pred & pred <= 0.45,1, 0),
+  f10_pred = ifelse(0.45 < pred & pred <= 0.5,1, 0),
+  f11_pred = ifelse(0.5 < pred & pred <= 0.55,1, 0),
+  f12_pred = ifelse(0.55 < pred & pred <= 0.6,1, 0),
+  f13_pred = ifelse(0.6 < pred & pred <= 0.65,1, 0),
+  f14_pred = ifelse(0.65 < pred & pred <= 0.7,1, 0),
+  f15_pred = ifelse(0.7 < pred & pred <= 0.75,1, 0),
+  f16_pred = ifelse(0.75 < pred & pred <= 0.8,1, 0),
+  f17_pred = ifelse(0.8 < pred & pred <= 0.85,1, 0),
+  f18_pred = ifelse(0.85 < pred & pred <= 0.9,1, 0),
+  f19_pred = ifelse(0.9 < pred & pred <= 0.95,1, 0),
+  f20_pred = ifelse(0.95 < pred & pred <= 1,1, 0)
+)
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Tabela 2 - Faixas de corte para valores verdadeiros
+tabela2 <- tabela2  %>% mutate(
+  f1_verd = ifelse(churn==1 & pred<= 0.05,1, 0),
+  f2_verd = ifelse(churn==1 & 0.05< pred & pred<= 0.1, 1,0),
+  f3_verd = ifelse(churn==1 & 0.1 < pred & pred<= 0.15,1, 0),
+  f4_verd = ifelse(churn==1 & 0.15 < pred & pred<= 0.2,1, 0),
+  f5_verd = ifelse(churn==1 & 0.2 < pred & pred <= 0.25,1, 0),
+  f6_verd = ifelse(churn==1 & 0.25 < pred & pred <= 0.3,1, 0),
+  f7_verd = ifelse(churn==1 & 0.3 < pred & pred <= 0.35,1, 0),
+  f8_verd = ifelse(churn==1 & 0.35 < pred & pred <= 0.4,1, 0),
+  f9_verd = ifelse(churn==1 & 0.4 < pred & pred <= 0.45,1, 0),
+  f10_verd = ifelse(churn==1 & 0.45 < pred & pred <= 0.5,1, 0),
+  f11_verd = ifelse(churn==1 & 0.5 < pred & pred <= 0.55,1, 0),
+  f12_verd = ifelse(churn==1 & 0.55 < pred & pred <= 0.6,1, 0),
+  f13_verd = ifelse(churn==1 & 0.6 < pred & pred <= 0.65,1, 0),
+  f14_verd = ifelse(churn==1 & 0.65 < pred & pred <= 0.7,1, 0),
+  f15_verd = ifelse(churn==1 & 0.7 < pred & pred <= 0.75,1, 0),
+  f16_verd = ifelse(churn==1 & 0.75 < pred & pred <= 0.8,1, 0),
+  f17_verd = ifelse(churn==1 & 0.8 < pred & pred <= 0.85,1, 0),
+  f18_verd = ifelse(churn==1 & 0.85 < pred & pred <= 0.9,1, 0),
+  f19_verd = ifelse(churn==1 & 0.9 < pred & pred <= 0.95,1, 0),
+  f20_verd = ifelse(churn==1 & 0.95 < pred & pred <= 1,1, 0)
+)
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Esta tabela será utilizada para criar a simulação no Excel
+#Tabela Final
+total_colunas <- colSums(select(tabela2, 4:43), na.rm = TRUE)
+total_colunas1<- data.frame(total_colunas)
+total_colunas1
+```
+
