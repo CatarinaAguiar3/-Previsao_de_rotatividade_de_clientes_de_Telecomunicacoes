@@ -11,7 +11,7 @@ O projeto foi dividido em quatro arquivos:
 <ul>
   <li>O primeiro arquivo contém a limpeza e transformação dos dados, além da Análise Descritiva. Este arquivo possui duas versões: <a href="https://github.com/CatarinaAguiar3/Previsao-de-rotatividade-de-clientes-de-Telecomunicacoes/blob/main/1.Telecom_Limpeza_Transfomacao_Analise_Descritiva.md">Markdown</a> e <a href="https://catarinaaguiar3.github.io/Previsao-de-rotatividade-de-clientes-de-Telecomunicacoes/1.Telecom_Limpeza_Transfomacao_Analise_Descritiva.html">HTML</a></li>
   <li>No segundo arquivo foi realizada a modelagem utilizando Regressão Logistica e o algoritmo Random Forest. Versões: <a href="https://github.com/CatarinaAguiar3/Previsao-de-rotatividade-de-clientes-de-Telecomunicacoes/blob/main/2.Telecom_Modelagem.md">Markdown</a> <a href="https://github.com/CatarinaAguiar3/Previsao-de-rotatividade-de-clientes-de-Telecomunicacoes/blob/main/2.Telecom_Modelagem.html">HTML</a></li>
-  <li>No terceiro arquivo, os hiperparâmetros foram ajustados. Versões: <a href="">Markdown</a> e <a href="">HTML</a></li>
+  <li>No terceiro arquivo, os hiperparâmetros foram ajustados. Versões: <a href="https://github.com/CatarinaAguiar3/Previsao-de-rotatividade-de-clientes-de-Telecomunicacoes/blob/main/3.Telecom_Ajuste_Hiperparametro.md">Markdown</a> e <a href="https://github.com/CatarinaAguiar3/Previsao-de-rotatividade-de-clientes-de-Telecomunicacoes/blob/main/3.Telecom_Ajuste_Hiperparametro.html">HTML</a></li>
   <li>No quarto arquivo foi feita a marcação dos dados de teste. Versões: <a href="">Markdown</a> e <a href="">HTML</a></li>
 </ul>
 
