@@ -1,0 +1,1201 @@
+---
+title: "8. Ajuste de Hiperparâmetros: Previsão de rotatividade de clientes de Telecomunicações"
+author: "Catarina Aguiar"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    toc_depth: 5
+    keep_md: yes
+---
+
+```{r setup, include=FALSE}
+## Global options
+knitr::opts_chunk$set(cache = TRUE)
+```
+
+# **Introdução**
+
+O ajuste dos hiperparâmetros pode melhorar o desempenho do algoritmo Random Forest. Segundo Probst et al. (2019), nem todos os hiperparâmetros são "parâmetros de ajuste". Por isso, é necessário escolher bem os parâmetros a serem ajustados, assim como seus respectivos valores.
+
+Cada "parâmetro de ajuste" tem uma função específica. Por exemplo, nodesize controla a estrutura de cada árvore individual, ntree controla a estrutura e o tamanho da floresta e mtry controla o nível de aleatoriedade (PROBST et al., 2019).
+
+Os hiperparâmtros que serão ajustados neste projeto são: ntree, mtry, nodesize e samplesize.
+
+**Ntree:** Número de árvores. Este é um parâmetro que normalmente não é ajustado, porém deve ser grande o suficiente (PROBST; BOULESTEIX, 2017). Um grande número tende a aumentar o poder preditivo do modelo, mas isso acontece a taxas decrescentes (ELLIS, 2022b).
+
+O ntree incial é igual a 100. No ajuste, será simulado valores de 200, 300, 400, 500 e 700. De acordo com Ellis(2022c), este deve ser o primeiro a parâmetro a ser ajustado. Portanto, esta recomendação será seguida aqui.  
+
+**Mtry:** Refere-se a quantas variáveis ​​são selecionadas aleatoriamente em uma divisão de nó. Este parâmetro controla quanta aleatoriedade é adicionada no processo de criação da árvore de decisão.Isso é importante para garantir que todas as árvores de decisão treinadas não sejam iguais (ELLIS, 2022a).
+
+De acordo com Probst et al. (2019), um valor padrão para classificação é a raiz quadrada no número de variáveis no conjunto de dados. Tem-se 20 preditoras no modelo Radom Forest 4 (modelo inicial). A raiz quadrada de 20 é aprox. 4,47. Logo serão testados os valores 3, 4, 5 e 6.  
+
+**Nodesize:** Especifica o número mínimo de observações em um nó terminal. Ele controla a complexidade das arvores e está relacionado com a sua profundidade. Pois um nodesize menor permite arvores mais profundas e complexas.
+
+O valor padrão é 1 para classificação (PROBST et al., 2019). Porém em grandes conjuntos de dados aumentar o nodesize pode ser uma boa estratégia já que diminui o tempo computacional sem a perda do desempenho de previsão (Segal, 2004).
+
+O nodesize inicial é igual 50. Como este conjunto de dados é grande será simulado valores a cima e a baixo de 50.
+
+**Samplesize:** Representa o tamanho da amostra, ou seja, o número de observações extraídas para treinamento de cada árvore.
+
+Ao reduzir esse tamanho, cada árvore será treinada com menos dados, consequentemente, elas serão mais diversas entre si (PROBST et al., 2019). Isso aumenta a precisão geral do modelo, pois ajuda o algoritmo a capturar padrões nos dados.
+
+Entretanto, a precisão de cada árvore diminui. Além disso, a redução de samplesize impacta negativamente na estabilidade individual de cada. Portanto, a escolha do valor de sample size é trade-off entre precisão e estabilidade (PROBST et al., 2019).  
+
+# Execução do Ajuste de Hiperparâmetros
+
+O ajuste dos Hiperparâmetros será feito de três maneiras.
+
+1.  Será realizado o ajuste de forma automática utilizando o pacote Caret;
+
+2.  O ajuste manual será realizado com base nos valores descritos na introdução. Este ajuste está divido em 4 partes. Em cada etapa será feito o ajuste de um hiperparâmetro que vai ocorrer na seguinte ordem: ntree, mtry, nodesize e samplesize.
+
+3.  Com o auxílio da função ranger, será criado um loop para escolher automaticamente os valores dos hiperparâmetros. Em seguida, será testado os 5 melhores resultados.
+
+# Carregar os pacotes
+
+```{r , message=FALSE, warning=FALSE}
+library(dplyr)
+library(lattice) #necessária para usar o pacote caret
+library(caret) #Fazer avaliação dos modelos, padronizar os dados etc
+library(randomForest) 
+library(ggplot2)
+library(ROCR)#para fazer a curva ROC
+library(pROC)
+```
+
+# Base de dados
+
+```{r}
+setwd("C:/0.Projetos/2.Telecom_customer_(Churn)/Scripts")
+dados_treino1 <- read.csv("dados_treino1.csv")
+dados_teste1 <- read.csv("dados_teste1.csv")
+```
+
+# Ajuste automático 1 (NÃO DEU CERTO)
+
+Ajuste automático utilizando o pacote Caret
+
+### Criar uma nova base de dados
+
+```{r}
+## Selecionar variaveis
+#rf4_var_t <- dados_treino1 %>% 
+#  select(churn, eqpdays, months, change_mou, totrev,
+#         mou_cvce_Mean, avgqty, rev_Mean, avgmou,
+#         totcalls, adjqty, adjmou, totmrc_Mean, totmou,
+#         peak_vce_Mean, plcd_vce_Mean, complete_Mean, unan_vce_Mean,
+#         avg6rev, drop_vce_Mean, ovrmou_Mean)
+
+
+# Converter a variável de resposta para um fator
+#rf4_var_t$churn <- as.factor(rf4_var_t$churn)
+
+# Converter a variável de resposta para um fator (XO e X1)
+#rf4_var_t$churn <- as.factor(make.names(as.character(rf4_var_t$churn)))
+```
+
+### Otimizar Hiperparâmetros
+
+```{r}
+#control <- trainControl(
+#  method = "cv",
+#  number = 10,
+#  savePredictions = TRUE,
+#  classProbs = TRUE
+#)
+
+#hyper_parameters <- expand.grid(
+#  mtry = c(6, 7, 8),
+#  nodesize = c(5, 10, 15)
+#)
+
+
+#model1 <- train(
+#  y = rf4_var_t[,1],
+#  x = rf4_var_t[, -1],
+#  method = "rf",
+#  trControl = control,
+#  ntree = c(50, 100, 200),
+#  tuneGrid= hyper_parameters
+#)
+```
+
+# Função para o cálculo da previsão e das métricas
+
+Esta função automatiza a previsão e as métricas dos modelos de ajuste
+
+```{r}
+# Função 
+f_rf4 <- function(var) {
+  pred_rf4 <- predict(var, newdata = dados_teste1, type = "response")
+  prob_rf4 <- ifelse(pred_rf4 >= 0.4, 1, 0)
+  prob_rf4 <- as.factor(prob_rf4)
+  verdadeiro <- factor(dados_teste1$churn)
+  matrix_rf4 <- confusionMatrix(prob_rf4, verdadeiro, positive = "1")
+  precision_rf4 <- matrix_rf4$byClass["Pos Pred Value"]
+  recall_rf4 <- matrix_rf4$byClass["Sensitivity"]
+  f1_score_rf4 <- 2 * (precision_rf4 * recall_rf4) / (precision_rf4 + recall_rf4)
+  ks_rf4 <- ks.test(pred_rf4, as.numeric(verdadeiro))
+  roc_rf4 <- roc(dados_teste1$churn, pred_rf4)
+  auc_valor <- auc(roc_rf4)
+  cat("Precision:", precision_rf4, "\n")
+  cat("Recall:", recall_rf4, "\n")
+  cat("F1-Score:", f1_score_rf4, "\n")
+  cat("Valor do KS:", ks_rf4$statistic, "\n")
+  cat("AUC:", auc_valor, "\n")
+  print(matrix_rf4$table)
+  
+}
+```
+
+# Ajuste manual 1a
+
+Testar ntree=200
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 1a
+### ntree=200
+set.seed(123)
+rf4_ajuste1a <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                      mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                      totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                      peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                      avg6rev + drop_vce_Mean + ovrmou_Mean , data= dados_treino1, 
+                      importance= T,cv=10,  ntree = 200, 
+                    mtry = 8, nodesize= 50, type = "classification")
+```
+
+```{r ,message=FALSE, warning=FALSE}
+result_rf4_ajuste1a<-f_rf4(rf4_ajuste1a)
+#Resultados:
+#Precision: 0.549729 
+#Recall: 0.8203279 
+#F1-Score: 0.6583056 
+#Valor do KS: 1 
+#AUC: 0.6595368 
+```
+
+# Ajuste manual 1b
+
+Testar ntree=300
+
+```{r, message=FALSE, warning=FALSE}
+# Ajuste 1b
+### ntree=300
+set.seed(123)
+rf4_ajuste1b <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean , 
+                             data= dados_treino1, importance= T,cv=10, ntree = 300, 
+                             mtry = 8, nodesize= 50, type = "classification")
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste1b<-f_rf4(rf4_ajuste1b)
+#Resultados:
+#Precision: 0.5517949 
+#Recall: 0.8231694 
+#F1-Score: 0.6607018 
+#Valor do KS: 1 
+#AUC: 0.6608051
+
+```
+
+# Ajuste manual 1c
+
+Testar ntree=400
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 1c 
+### ntree=400
+set.seed(123)
+rf4_ajuste1c <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean , data= dados_treino1,
+                             importance= T, cv=10, ntree = 400, 
+                             mtry = 8, nodesize= 50, type = "classification")
+
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste1c<-f_rf4(rf4_ajuste1c)
+#Resultados:
+#Precision: 0.5514921 
+#Recall: 0.8240437 
+#F1-Score: 0.6607659 
+#Valor do KS: 1 
+#AUC: 0.6614021 
+```
+
+# Ajuste manual 1 d
+
+Testar ntree=500
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 1d 
+### ntree=500
+set.seed(123)
+rf4_ajuste1d <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean , data= dados_treino1,
+                             importance= T, cv=10, ntree = 500, 
+                             mtry = 8, nodesize= 50, type = "classification")
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste1d<-f_rf4(rf4_ajuste1d)
+#Resultados:
+#Precision: 0.5522737 
+#Recall: 0.8255738 
+#F1-Score: 0.6618188 
+#Valor do KS: 1 
+#AUC: 0.6618625 
+```
+
+# Ajuste manual 1e
+
+Testar ntree=700
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 1e
+### ntree=700
+set.seed(123)
+rf4_ajuste1e <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean , data= dados_treino1,
+                             importance= T, cv=10, ntree = 700, 
+                             mtry = 8, nodesize= 50, type = "classification")
+```
+
+```{r,message=FALSE, warning=FALSE}
+
+result_rf4_ajuste1e<-f_rf4(rf4_ajuste1e)
+#Resultados:
+#Precision: 0.5507162 
+#Recall: 0.8236066 
+#F1-Score: 0.6600683 
+#Valor do KS: 1 
+#AUC: 0.6627349 
+```
+
+# Resultado parcial 1
+
+O modelo escolhido foi `Ajuste 1d`com `ntree`=500
+
+![](images/ajuste1_hiper_result_parcial-04.png)
+
+![](images/ajuste1_hiper_todos_modelos-03.png)
+
+# Ajuste manual 2a
+
+Testar mtry= 3
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 2a 
+#São 20 preditores
+#Raiz quadrada de 20 é 4,47
+#Um terço de 20 é 6,667
+#log na base 2 de 20 é 4,322
+
+#mtry= 3
+set.seed(123)
+rf4_ajuste2a <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean , data= dados_treino1,
+                             importance= T,cv=10, ntree = 500, 
+                             mtry = 3, nodesize= 50, type = "classification")
+
+```
+
+```{r}
+result_rf4_ajuste2a<-f_rf4(rf4_ajuste2a)
+#Resultados
+#Precision: 0.5491008 
+#Recall: 0.8408743 
+#F1-Score: 0.664364 
+#Valor do KS: 1 
+#AUC: 0.6635467
+```
+
+# Ajuste manual 2b
+
+Testar mtry= 4
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 2b 
+#São 20 preditores
+#Raiz quadrada de 20 é 4,47
+#Um terço de 20 é 6,667
+#log na base 2 de 20 é 4,322
+
+#mtry= 4
+set.seed(123)
+rf4_ajuste2b <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T,cv=10, ntree = 500, 
+                             mtry = 4, nodesize= 50, type = "classification")
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste2b<-f_rf4(rf4_ajuste2b)
+#Resultado:
+#Precision: 0.5501933 
+#Recall: 0.8397814 
+#F1-Score: 0.6648209 
+#Valor do KS: 1 
+#AUC: 0.6623283 
+```
+
+# Ajuste manual 2c
+
+Testar mtry= 5
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 2c
+#São 20 preditores
+#Raiz quadrada de 20 é 4,47
+#Um terço de 20 é 6,667
+#log na base 2 de 20 é 4,322
+
+#mtry= 5
+set.seed(123)
+rf4_ajuste2c <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 5, nodesize= 50, type = "classification")
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste2c<-f_rf4(rf4_ajuste2c)
+#Resultado:
+#Precision: 0.5515695 
+#Recall: 0.8334426 
+#F1-Score: 0.6638231 
+#Valor do KS: 1 
+#AUC: 0.6639341 
+```
+
+# Ajuste manual 2d
+
+Testar mtry= 6
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 2d 
+#São 20 preditores
+#Raiz quadrada de 20 é 4,47
+#Um terço de 20 é 6,667
+#log na base 2 de 20 é 4,322
+
+#mtry= 6
+set.seed(123)
+rf4_ajuste2c <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 6, nodesize= 50, type = "classification")
+```
+
+```{r ,message=FALSE, warning=FALSE}
+result_rf4_ajuste2c<-f_rf4(rf4_ajuste2c)
+#Resultado:
+#Precision: 0.5515134 
+#Recall: 0.8284153 
+#F1-Score: 0.6621822 
+#Valor do KS: 1 
+#AUC: 0.6634432 
+```
+
+# Resultado Parcial 2
+
+O modelo escolhido foi `Ajuste 2c` com `mtry`=5. Esta é a segunda melhor opção de modelo. Pois o modelo `Ajuste 2b` tinha o maior F1-Score, porém tinha um precision pior que o modelo inicial (sem ajuste). E, apesar da métrica de avaliação ser o F1, é desejado aumentar o precision.
+
+![](images/ajuste2_hiper_result_parcial-01.png)
+
+![](images/ajuste2_hiper_todos_modelos-01.png)
+
+# Ajuste manual 3a
+
+Testar nodesize=40
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 3a 
+#nodesize=40
+set.seed(123)
+rf4_ajuste3a <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 5, nodesize= 40, type = "classification")
+
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste3a<-f_rf4(rf4_ajuste3a)
+#Resultado:
+#Precision: 0.5496746 
+#Recall: 0.8308197 
+#F1-Score: 0.6616188 
+#Valor do KS: 1 
+#AUC: 0.6631885 
+```
+
+# Ajuste manual 3b
+
+Testar nodesize=60
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 3b 
+#nodesize=60
+set.seed(123)
+rf4_ajuste3b <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 5, nodesize= 60, type = "classification")
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste3b<-f_rf4(rf4_ajuste3b)
+
+#Resultado:
+#Precision: 0.5506038 
+#Recall: 0.8371585 
+#F1-Score: 0.6642962 
+#Valor do KS: 1 
+#AUC: 0.6648523 
+```
+
+# Ajuste manual 3c
+
+Testar nodesize=80
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 3c 
+#nodesize=80
+set.seed(123)
+rf4_ajuste3c <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 5, nodesize= 80, type = "classification")
+
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste3c<-f_rf4(rf4_ajuste3c)
+
+#Resultado
+#Precision: 0.5524002 
+#Recall: 0.8375956 
+#F1-Score: 0.6657401 
+#Valor do KS: 1 
+#AUC: 0.6656066
+```
+
+# Ajuste manual 3d
+
+Testar nodesize=100
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 3d 
+#nodesize=100
+set.seed(123)
+rf4_ajuste3d <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 5, nodesize= 100, type = "classification")
+
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste3d<-f_rf4(rf4_ajuste3d)
+```
+
+# Resultado Parcial 3
+
+O modelo escolhido foi `Ajuste 3c` com `nodesize`=80. Esta é a segunda melhor opção de modelo. Pois o modelo `Ajuste 3d` tinha o maior F1-Score, porém tinha o segundo melhor precision. E, apesar da métrica de avaliação ser o F1, é desejado aumentar o precision.
+
+![](images/ajuste3_hiper_result_parcial-01.png)
+
+![](images/ajuste3_hiper_todos_modelos-01.png)
+
+# Ajuste manual 4a
+
+Testar samplesize= 1000
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 4a 
+#valor padrão é 63,25% do conjunto de treinamento
+#Conjunto de treino de 44363 observações
+# 63,25% * 44363 = 28.059,5975
+
+#samplesize= 1000
+
+set.seed(123)
+rf4_ajuste4a <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 5, nodesize= 100, type = "classification", sampsize=1000 )
+
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste4a<-f_rf4(rf4_ajuste4a)
+```
+
+# Ajuste manual 4b
+
+Testar samplesize= 10.000
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 4b 
+#valor padrão é 63,25% do conjunto de treinamento
+#Conjunto de treino de 44363 observações
+# 63,25% * 44363 = 28.059,5975
+
+#samplesize= 10.000
+
+set.seed(123)
+rf4_ajuste4b <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 5, nodesize= 100, type = "classification", sampsize=10000 )
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste4b<-f_rf4(rf4_ajuste4b)
+```
+
+# Ajuste 4c
+
+Testar samplesize= 15.000
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 4c 
+#valor padrão é 63,25% do conjunto de treinamento
+#Conjunto de treino de 44363 observações
+# 63,25% * 44363 = 28.059,5975
+
+#samplesize= 15.000
+
+set.seed(123)
+rf4_ajuste4c <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 5, nodesize= 100, type = "classification", sampsize=15000 )
+
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste4c<-f_rf4(rf4_ajuste4c)
+```
+
+# Ajuste manual 4d
+
+Testar samplesize= 18.000
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 4d 
+#valor padrão é 63,25% do conjunto de treinamento
+#Conjunto de treino de 44363 observações
+# 63,25% * 44363 = 28.059,5975
+
+#samplesize= 18.000
+
+set.seed(123)
+rf4_ajuste4d <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 5, nodesize= 100, type = "classification", sampsize=18000 )
+
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste4d<-f_rf4(rf4_ajuste4d)
+```
+
+# Ajuste manual 4e
+
+Testar samplesize= 20.000
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 4e 
+#valor padrão é 63,25% do conjunto de treinamento
+#Conjunto de treino de 44363 observações
+# 63,25% * 44363 = 28.059,5975
+
+#samplesize= 20.000
+
+set.seed(123)
+rf4_ajuste4e <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 5, nodesize= 100, type = "classification", sampsize=20000 )
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste4e<-f_rf4(rf4_ajuste4e)
+```
+
+# Ajuste manual 4f
+
+Testar samplesize= 25.000
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 4f 
+#valor padrão é 63,25% do conjunto de treinamento
+#Conjunto de treino de 44363 observações
+# 63,25% * 44363 = 28.059,5975
+
+#samplesize= 25.000
+
+set.seed(123)
+rf4_ajuste4f <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 5, nodesize= 100, type = "classification", sampsize=25000 )
+
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste4f<-f_rf4(rf4_ajuste4f)
+```
+
+# Ajuste manual 4g
+
+Testar samplesize= 28.000
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 4g 
+#valor padrão é 63,25% do conjunto de treinamento
+#Conjunto de treino de 44363 observações
+# 63,25% * 44363 = 28.059,5975
+
+#samplesize= 28.000
+
+set.seed(123)
+rf4_ajuste4g <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 5, nodesize= 100, type = "classification", sampsize=28059 )
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste4f<-f_rf4(rf4_ajuste4f)
+```
+
+# Resultado parcial 4
+
+O modelo escolhido foi `Ajuste 4e` com `samplesize`=20.000. Esta é a segunda melhor opção de modelo. Pois o modelo `Ajuste 4g` tinha o maior F1-Score, porém tinha um precision pior que o modelo inicial (sem ajuste). E, apesar da métrica de avaliação ser o F1, é desejado aumentar o precision.
+
+![](images/ajuste4_hiper_result_parcial-01.png)
+
+![](images/ajuste4_hiper_todos_modelos-01.png)
+
+# Ajuste manual 5a
+
+Testar maxdepth =20
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 5a 
+#Arvores mais profudas melhoram o desempenho preditivo
+#Porém, aumentam as chances de overfitting 
+#Valores entre 1 e 20
+
+#maxdepth =20
+
+set.seed(123)
+rf4_ajuste5a <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 5, nodesize= 100, maxdepth =20, type = "classification", sampsize=20000 )
+
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste5a<-f_rf4(rf4_ajuste5a)
+```
+
+# Ajuste manual 5b
+
+Testar maxdepth =15
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 5b 
+
+#Arvores mais profudas melhoram o desempenho preditivo
+#Porém, aumentam as chances de overfitting 
+#Valores entre 1 e 20
+
+#maxdepth =15
+
+set.seed(123)
+rf4_ajuste5b <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 5, nodesize= 100, maxdepth =15, type = "classification", sampsize=20000 )
+
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste5b<-f_rf4(rf4_ajuste5b)
+```
+
+# Ajuste manual 5c
+
+Testar maxdepth =100
+
+```{r,message=FALSE, warning=FALSE}
+# Ajuste 5c 
+
+#Arvores mais profudas melhoram o desempenho preditivo
+#Porém, aumentam as chances de overfitting 
+#Valores entre 1 e 20
+
+#maxdepth =100
+
+set.seed(123)
+rf4_ajuste5c <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 5, nodesize= 100, maxdepth =100, type = "classification", sampsize=20000 )
+
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_ajuste5c<-f_rf4(rf4_ajuste5c)
+```
+
+# Resultado Parcial 5
+
+![](images/ajuste5_hiper_todos_modelos-01.png)
+
+# Modelo escolhido no ajuste manual
+
+O Modelo escolhido é `Ajuste 4e` com `ntree` = 500, `mtry` = 5, `nodesize`= 100 e `sampsize`=20000
+
+# Ajuste automático 2
+
+O ajuste terá como base o código deste [link](https://stackoverflow.com/questions/37514603/hyper-parameter-tuning-using-pure-ranger-package-in-r). Ele será feito utilizando a função ranger e um loop. Os hiperparâmetros a serem ajustados são: mtry, nodesize e ntree.
+
+### Carregar os pacotes
+
+```{r}
+#Carregar os pacotes
+#library(ranger)
+#library(tune)
+#library(tuneRanger) 
+#library(mlr)
+```
+
+### Escolhas dos hiperparâmetros e métrica
+
+```{r}
+# Escolhas dos parâmetros e métrica
+#hyper_grid <- expand.grid(
+#  mtry       = 3:15,
+#  node_size  = 40:100,
+#  num.trees = seq(300, 500, 600),
+#  OOB_Error   = 0
+#)
+```
+
+### Loop
+
+```{r}
+#system.time(
+#  for(i in 1:nrow(hyper_grid)) {
+#    # Treinar o modelo
+#    rf <- ranger(
+#      formula        = churn ~ eqpdays + months + change_mou + totrev + mou_cvce_Mean + 
+#        avgqty + rev_Mean + avgmou +
+#        totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+#        peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+#        avg6rev + drop_vce_Mean + ovrmou_Mean,
+#      data           = dados_treino1,
+#      num.trees      = hyper_grid$num.trees[i],
+#      mtry           = hyper_grid$mtry[i],
+#      min.node.size  = hyper_grid$node_size[i],
+#      importance     = 'impurity',
+#      probability    = TRUE  # Adicionado para obter probabilidades de classe
+#    )
+  # Adicionar erro OOB à grade
+#    hyper_grid$OOB_Error[i] <- 1 - rf$prediction.error
+#  }
+#)
+```
+
+### Resultado
+
+```{r}
+#nrow(hyper_grid) # 793 modelos
+#position = which.min(hyper_grid$OOB_Error)# 13
+#head(hyper_grid[order(hyper_grid$OOB_Error),],10)
+
+#Resultado:
+#   mtry node_size num.trees OOB_Error
+#13   15        40       300 0.7700599
+#26   15        41       300 0.7701093
+#65   15        44       300 0.7702436
+#25   14        41       300 0.7702641
+#91   15        46       300 0.7703602
+#12    14        40       300 0.7703764
+#104   15        47       300 0.7703810
+#36    12        42       300 0.7703924
+#64    14        44       300 0.7704041
+#116   14        48       300 0.7704126
+
+```
+
+A seguir serão testados os 5 melhores resultados.
+
+# Best model 1
+
+Teste com mtry=15, nodesize=40 e ntree=300
+
+```{r,message=FALSE, warning=FALSE}
+#Testar best model 1
+#mtry=15
+#node_size=40
+#num.trees=300
+best.model1<- randomForest(churn ~ eqpdays + months + change_mou + totrev + mou_cvce_Mean + 
+                            avgqty + rev_Mean + avgmou +
+                            totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                            peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                            avg6rev + drop_vce_Mean + ovrmou_Mean,
+                          data = dados_treino1, importance= T, cv=10, ntree = 300, 
+                          mtry = 15, nodesize= 40, type = "classification")
+
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_best_m1<-f_rf4(best.model1)
+
+```
+
+# Best model 2
+
+Teste com mtry=15, nodesize=41 e ntree=300
+
+```{r,message=FALSE, warning=FALSE}
+#Testar best model 2
+#mtry=15
+#node_size=41
+#num.trees=300
+best.model2<- randomForest(churn ~ eqpdays + months + change_mou + totrev + mou_cvce_Mean + 
+                             avgqty + rev_Mean + avgmou +
+                             totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                             peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                             avg6rev + drop_vce_Mean + ovrmou_Mean,
+                           data = dados_treino1, importance= T, cv=10, ntree = 300, 
+                           mtry = 15, nodesize= 41, type = "classification")
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_best_m2<-f_rf4(best.model2)
+
+```
+
+# Best model 3
+
+Teste com mtry=15, nodesize=44 e ntree=300
+
+```{r,message=FALSE, warning=FALSE}
+#Testar best model 3
+#mtry=15
+#node_size=44
+#num.trees=300
+best.model3<- randomForest(churn ~ eqpdays + months + change_mou + totrev + mou_cvce_Mean + 
+                             avgqty + rev_Mean + avgmou +
+                             totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                             peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                             avg6rev + drop_vce_Mean + ovrmou_Mean,
+                           data = dados_treino1, importance= T, cv=10, ntree = 300, 
+                           mtry = 14, nodesize= 44, type = "classification")
+
+```
+
+```{r, message=FALSE, warning=FALSE}
+result_rf4_best_m3<-f_rf4(best.model3)
+
+```
+
+# Best model 4
+
+Teste com mtry=14, nodesize=41 e ntree=300
+
+```{r,message=FALSE, warning=FALSE}
+#Testar best model 4
+#mtry=14
+#node_size=41
+#num.trees=300
+best.model4<- randomForest(churn ~ eqpdays + months + change_mou + totrev + mou_cvce_Mean + 
+                             avgqty + rev_Mean + avgmou +
+                             totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                             peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                             avg6rev + drop_vce_Mean + ovrmou_Mean,
+                           data = dados_treino1, importance= T, cv=10, ntree = 300, 
+                           mtry = 14, nodesize= 41, type = "classification")
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_best_m4<-f_rf4(best.model4)
+
+```
+
+# Best model 5
+
+Teste com mtry=15, nodesize=46 e ntree=300
+
+```{r,message=FALSE, warning=FALSE}
+#Testar best model 5
+#mtry=15
+#node_size=46
+#num.trees=300
+best.model5<- randomForest(churn ~ eqpdays + months + change_mou + totrev + mou_cvce_Mean + 
+                             avgqty + rev_Mean + avgmou +
+                             totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                             peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                             avg6rev + drop_vce_Mean + ovrmou_Mean,
+                           data = dados_treino1, importance= T, cv=10, ntree = 300, 
+                           mtry = 15, nodesize= 46, type = "classification")
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_rf4_best_m5<-f_rf4(best.model5)
+
+```
+
+# Resultado Parcial do Ajusto automático
+
+O modelo escolhido é o `Best Model 2` com `ntree`=300, `mtry`=15 e `nodesize`=41.
+
+![](images/ajuste_autom_hiper_result_parcial-04.png)
+
+![](images/ajuste_autom_hiper_todos_modelos-02.png)
+
+# Resultado final
+
+O modelo com maior F1-Score é o `Ajuste 1e` . Este será o modelo final.
+
+![](images/ajuste_hiper_result_final-01.png)
+
+# Modelo Final e suas características
+
+```{r,message=FALSE, warning=FALSE}
+set.seed(123)
+final_model <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                               mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                               totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                               peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                               avg6rev + drop_vce_Mean + ovrmou_Mean ,
+                             data= dados_treino1, importance= T, cv=10, ntree = 500, 
+                             mtry = 5, nodesize= 100, type = "classification", sampsize=20000 )
+```
+
+```{r,message=FALSE, warning=FALSE}
+result_final_model<-f_rf4(final_model)
+```
+
+### Hiperparâmetros
+
+-   **ntree** = 500 -\> Número de árvores
+
+-   **mtry** = 5 -\> Número de variáveis selecionadas aleatoriamente em cada divisão
+
+-   **nodesize** = 100 -\> Número mínimo de amostras dentro dos nós terminais
+
+-   **sampsize** =20000 -\> Tamanho da amostra
+
+### Preditoras
+
+As variáveis preditoras do modelo final são:
+
+-   **eqpdays:** Número de dias (idade) do equipamento atual;
+
+-   **months:** Número total de meses de serviço;
+
+-   **change_mou:** Alteração percentual nos minutos mensais de uso em relação à média dos três meses anteriores;
+
+-   **totrev:** Rendimento total;
+
+-   **mou_cvce_Mean:** Média de minutos não arredondados de uso de chamadas de voz concluídas;
+
+-   **avgqty:** Número médio mensal de chamadas ao longo da vida do cliente;
+
+-   **adjmou:** Faturamento ajustado do total de minutos de uso ao longo da vida do cliente;
+
+-   **totmrc_Mean:** Média de cobrança recorrente mensal total;
+
+-   **totmou:** Total de minutos de uso ao longo da vida do cliente;
+
+-   **peak_vce_Mean:** Número médio de chamadas de voz de entrada e saída de pico;
+
+-   **plcd_vce_Mean:** Número médio de tentativas de chamadas de voz realizadas;
+
+-   **complete_Mean:** Número médio de chamadas concluídas;
+
+-   **unan_vce_Mean:** Número médio de chamadas de voz não atendidas;
+
+-   **avg6rev:** Receita média mensal nos seis meses anteriores;
+
+-   **drop_vce_Mean:** Número médio de chamadas de voz perdidas (com falha);
+
+-   **ovrmou_Mean:** Média de minutos excedentes de uso
+
+### Importância das preditoras
+
+```{r,message=FALSE, warning=FALSE}
+#Calcular a importancia
+imp <- importance(final_model, type = 2) %>% desc()
+
+DT::datatable(imp)
+```
+
+```{r,message=FALSE, warning=FALSE}
+# Crie um data frame com os dados
+df_imp <- data.frame(
+  Variaveis = rownames(imp),
+  Importancia = imp[,1]
+) %>% arrange(desc(Importancia))
+
+
+# Crie um gráfico de barras horizontais
+df_imp %>% 
+  ggplot(aes(y = reorder(Variaveis, -Importancia), x = Importancia)) + geom_bar(stat = "identity", fill = "#9F2042") +
+  labs(title = "Importância das Variáveis",
+       x = "Importancia",
+       y = "Variável") +
+  theme_minimal() +
+  scale_x_continuous(trans = "reverse")  # Inverte a escala do eixo x (esquerda para direita)
+
+
+```
+
+A variável **Número de dias (idade) do equipamento atual** é a mais importante, seguida **Número total de meses de serviço** e **Alteração percentual nos minutos mensais de uso em relação à média dos três meses anteriores.**
+
+### Métricas e Curva ROC
+
+**Métricas**
+
+```{r,message=FALSE, warning=FALSE}
+final_model_resul <- f_rf4(final_model)
+```
+
+**Precison** é 55,06%. Isso significa que de 100 clientes que o modelo diz irem embora (churn), apenas 55 clientes realmente vão.
+
+**Recall** é de 88,13%. Ou seja, o modelo diz que 55,06% dos clientes vão cancelar o serviço (churn). Porém, estes 55,06% dos clientes que cancelam representam 88,13% de todo mundo que realmente cancela o serviço (churn).
+
+![](images/matriz_confusão1-01.png)
+
+Segundo a matriz de confusão, o modelo diz que 7073 clientes vão embora. Entretanto realmente vão embora 3895. Além disso, o modelo deixou de prever o churn de 680 clientes.
+
+**Gráfico Curva ROC**
+
+```{r,message=FALSE, warning=FALSE}
+pred_final_model <- predict(final_model, newdata = dados_teste1,  type = "response")
+roc_final_model <- roc(dados_teste1$churn, pred_final_model)
+```
+
+```{r,message=FALSE, warning=FALSE}
+par(mar = c(5, 5, 4, 2) + 0.1)  # Ajustar as margens
+plot(roc_final_model, col = "#9F2042", main = "Curva ROC do Modelo Final", print.thres = T)
+#legend("bottomright", legend = c("Modelo 4"), col = c("#FF8E00"), lwd = 2)
+```
+
+# Alguns números
+
+-   Segundo o site statista, as taxas anuais de rotatividade na indústria de telecomunicações dos EUA foram de cerca de 21% em 2020 (ou 1,75% mensalmente).
+
+-   A Cell2Cell é uma das maiores empresas sem fio dos EUA, com mais de 10 milhões de clientes, e sua taxa média mensal de rotatividade é de 4% (V. UMAYAPARVATHI; K. IYAKUTTI, 2016)
+
+-   A taxa de rotatividade anual na indústria de telecomunicações varia de 20% a 40%, e o custo de reter clientes existentes é 5 a 10 vezes menor do que o custo de obtenção de novos clientes (XU; MA; KIM, 2021).
+
+-   O custo de prever a rotatividade de clientes é 16 vezes menor do que o custo de obtenção de novos clientes (XU; MA; KIM, 2021).
+
+-   Diminuir a taxa de rotatividade em 5% aumenta o lucro de 25% para 85% (XU; MA; KIM, 2021).
+
+-   Segundo uma pesquisa feita pelo site techsee, 40% dos clientes de telecomunicações afirmam que teriam mudado de ideias se lhes tivesse sido oferecido um plano de serviços melhor
+
+-   Em 2021, a receita média mensal por usuário (ARPU) gerada pelos serviços móveis sem fio nos Estados Unidos foi de 35,74 dólares americanos, segundo o site statista.
+
+# Referências:
+
+Customer service: churn rate by industry U.S. 2017 \| Statistic.**Statista**. Disponível em: <https://www.statista.com/statistics/816735/customer-churn-rate-by-industry-us/>
+
+ELLIS, C. Mtry in random forests. **Crunching the data**. 28 ago. 2022. Disponível em: <https://crunchingthedata.com/mtry-in-random-forests/>
+
+ELLIS, C. Number of trees in random forests. **Crunching the data.** 27 ago. 2022. Disponível em: <https://crunchingthedata.com/number-of-trees-in-random-forests/>
+
+ELLIS, C. Hyperparameter tuning in random forests. **Crunching the data**. 20 set. 2022. Disponível em: <https://crunchingthedata.com/hyperparameter-tuning-in-random-forests/>
+
+PROBST, P.; BOULESTEIX, A.-L. To tune or not to tune the number of trees in random forest? Disponível em: <https://arxiv.org/abs/1705.05654>
+
+PROBST, P.; WRIGHT, M. N.; BOULESTEIX, A. Hyperparameters and tuning strategies for random forest. Wiley Interdisciplinary Reviews: Data Mining and Knowledge Discovery, v. 9, n. 3, 28 jan. 2019.Disponível em: <https://wires.onlinelibrary.wiley.com/doi/abs/10.1002/widm.1301>
+
+Reasons for Customer Churn in Telecoms [Survey Results]. **Techsee.** Disponível em: <https://techsee.me/resources/reports/2019-telecom-churn-survey/>.
+
+SEGAL, M. R. Machine Learning Benchmarks and Random Forest Regression. Center for Bioinformatics& Molecular Biostatistics.2004.Disponível em: <https://escholarship.org/uc/item/35x3v9t4>
+
+US wireless service ARPU 1993-2021. **Statista.** Disponível em: <https://www.statista.com/statistics/183882/monthly-arpu-through-mobile-wireless-services-in-the-us-since-2004>
+
+V. UMAYAPARVATHI; K. IYAKUTTI. A Survey on Customer Churn Prediction in Telecom Industry: Datasets, Methods and Metrics. Disponível em: <https://www.semanticscholar.org/paper/A-Survey-on-Customer-Churn-Prediction-in-Telecom-Umayaparvathi-Iyakutti/47949cd15956733c503fdb393bfb18437af1cd72>
+
+XU, T.; MA, Y.; KIM, K. Telecom Churn Prediction System Based on Ensemble Learning Using Feature Grouping. Applied Sciences, v. 11, n. 11, p. 4742, 21 maio 2021.Disponível em: <https://doi.org/10.3390/app11114742>  

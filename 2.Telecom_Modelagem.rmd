@@ -1,0 +1,1540 @@
+---
+title: "7. Modelagem: Previsão de rotatividade de clientes de Telecomunicações"
+date: ''
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    toc_depth: 5
+    keep_md: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Carregar os pacotes
+
+```{r, message=FALSE, warning=FALSE}
+library(dplyr)
+library(data.table)
+library(tidyr)
+library(ggplot2)
+library(tidyverse)
+library(psych) # função describe
+library(ggcorrplot) # grafico de correlação
+library(pastecs)
+library(dummy) #Criar dummy: linhas passam a ser colunas binárias 
+library(randomForest) #Usar no algoritmo Random Forest
+library(boot)#Fazer CrossValidation
+library(fastDummies) 
+library(stats) #Métrica KS
+#install.packages("ROCR")
+library(ROCR)#para fazer a curva ROC
+library(pROC)
+```
+
+```{r, message=FALSE, warning=FALSE}
+#install.packages("caret")
+#install.packages("randomForest")
+library(lattice) #necessária para usar o pacote caret
+library(caret) #Fazer avaliação dos modelos, padronizar os dados etc
+library(randomForest) 
+```
+
+```{r, message=FALSE, warning=FALSE}
+#Boruta
+#("ParamHelpers")
+library(ParamHelpers)
+
+#install.packages("mlr")
+library(mlr)
+
+#install.packages("Boruta")
+library(Boruta)
+
+```
+
+# Carregar a base de dados
+
+```{r}
+df_final1 <- read.csv("df_final_modelagem.csv")
+```
+
+# Quebrar o dataset em teste, treino e validação
+
+```{r}
+# Definindo a semente para reproduzibilidade
+set.seed(123)
+
+# Índices para amostra de treino (70% dos dados)
+indice_treino <- sample(1:nrow(df_final1), 0.7 * nrow(df_final1), replace=FALSE)
+
+# Índices para amostra de teste (15% dos dados)
+indice_teste <- sample(setdiff(1:nrow(df_final1), indice_treino), 0.15* nrow(df_final1), replace=FALSE) 
+
+# Índices para amostra de validação (15% dos dados restantes)
+indice_validacao <- setdiff(1:nrow(df_final1), c(indice_treino, indice_teste))
+
+
+#Conjunto de dados dividos
+dados_treino <- df_final1[indice_treino, ]
+dados_teste <- df_final1[indice_teste, ]
+dados_validacao <- df_final1[indice_validacao, ]
+
+#OBS: Índices para amostra de treino (indices_treino): São os índices das linhas do seu conjunto de dados original que foram selecionadas para compor o conjunto de treino. Esses índices são utilizados para extrair as linhas correspondentes do conjunto de dados original. Essencialmente, indices_treino são os números que indicam quais observações (linhas) do seu dataset original fazem parte do conjunto de treino
+```
+
+# Padronizar e Pré Processar os dados
+
+```{r}
+# Criar um objeto de pré-processamento com base nos dados de treinamento
+preproc <- preProcess(dados_treino, method = c("range"))
+```
+
+```{r}
+# Aplique o mesmo pré-processamento aos conjuntos de treinamento, teste e validação
+dados_treino1<- predict(preproc, dados_treino)
+dados_teste1 <- predict(preproc, dados_teste)
+dados_validacao1<- predict(preproc, dados_validacao)
+
+```
+
+```{r}
+dados_treino1 <- data.frame(dados_treino1)
+dados_teste1 <- data.frame(dados_teste1)
+dados_validacao1 <- data.frame(dados_validacao1)
+```
+
+```{r}
+#write.csv(dados_treino1,"dados_treino1.csv", row.names = FALSE)
+```
+
+# Dados de Treino e Teste
+
+```{r}
+setwd("C:/0.Projetos/2.Telecom_customer_(Churn)/Scripts")
+dados_treino1 <- read.csv("dados_treino1.csv")
+dados_teste1 <- read.csv("dados_teste1.csv")
+```
+
+# Verificar se os dados estão balanceados
+
+```{r}
+#Verificar se os dados estão balanceados
+table(dados_treino1$churn)
+prop.table(table(dados_treino1$churn))
+```
+
+# Logistico 1
+
+Modelo com todas as variáveis preditoras selecionadas na análise descritiva
+
+## Treinar o modelo
+
+```{r}
+#Treinar o modelo
+logistico1 <- glm(churn ~ ., data= dados_treino1, family = binomial(link = "logit"))
+summary(logistico1)
+
+```
+
+## Previsão do modelo
+
+```{r}
+# A type="response" opção informa Rpara gerar probabilidades no formato P(Y = 1|X)
+#https://www.science.smith.edu/~jcrouser/SDS293/labs/lab4-r.html#:~:text=The%20predict()%20function%20can,information%20such%20as%20the%20logit%20.
+
+#Previsão do Modelo
+pred_log1 <- predict(logistico1, newdata = dados_treino1)
+```
+
+## Matriz de Confusão
+
+```{r}
+# Ponto de corte = 0.5
+#Ponto de Corte: Transformar as probabilidades em rótulos de classe (0 ou 1) com base em um ponto de corte típico de 0.5
+#se o valor da variável pred_log1 for maior ou igual a 0.4, então prob_log2 recebe o valor 1, caso contrário, recebe o valor 0
+prob_log1 <- ifelse(pred_log1 >= 0.4, 1, 0)
+prob_log1 <- as.factor(prob_log1)
+
+#Criar uma tabela com todos os dados e o ponto de corte
+df_log1 <- cbind(dados_treino1, prob_log1) #Unir ponto de corte e dados_treino1
+#Mudar a posição do de prob_log1(ponto de corte) para que fique ao lado de churn
+df_log1 <- df_log1 %>% select(1, 56, 2:55)  
+
+#Para visualizar
+df_log1a <- df_log1 %>% select(1:4) 
+head(df_log1a)
+
+verdadeiro <- factor(dados_treino1$churn)
+
+# Criar a matriz de confusão
+matrix_log1 <- confusionMatrix(prob_log1, verdadeiro, positive = "1")
+```
+
+```{r}
+matrix_log1$table 
+```
+
+## Métricas
+
+```{r}
+# Calcular a precisão
+precision_log1 <- matrix_log1$byClass["Pos Pred Value"]
+
+# Calcular a revocação
+recall_log1 <- matrix_log1$byClass["Sensitivity"]
+
+# Calcular o F1-Score
+f1_score_log1 <- 2 * (precision_log1 * recall_log1) / (precision_log1 + recall_log1)
+
+
+#Calcular Teste KS
+ks_log1 <- ks.test(pred_log1, as.numeric(verdadeiro))
+
+
+# Exibir as métricas
+cat("Precision:", precision_log1, "\n")
+cat("Recall:", recall_log1, "\n")
+cat("F1-Score:", f1_score_log1, "\n")
+cat("Valor do KS:", ks_log1$statistic, "\n")
+
+```
+
+## Curva ROC
+
+```{r}
+# Calcule a curva ROC
+roc_log1 <- roc(dados_treino1$churn, pred_log1)
+roc_log1 
+
+# Calcule o AUC
+auc_log1<- auc(roc_log1)
+auc_log1
+
+```
+
+```{r}
+# Criar um gráfico da curva ROC 
+par(mar = c(5, 5, 4, 2) + 0.1)  # Ajustar as margens
+plot(roc_log1, col = "#EAB200", main = "Curva ROC", print.thres = T)
+legend("bottomright", legend = c("Logistico 1"), col = c("#EAB200"), lwd = 2)
+```
+
+# Teste da Razão de Verossimilhança do Modelo 1
+
+```{r}
+#Serve para comparar cada coeficiente de mandeira individual
+
+#1. Utilizando Anova
+anova(logistico1, test="Chisq")
+# adiciona as variáveis sequencialmente (a variável adicional melhora o modelo?)
+
+#2.Utilizando Drop1
+drop1(logistico1, test="Chisq")
+# remove as variáveis sequencialmente (a variável adicional melhora o modelo?)
+```
+
+# Logistico 2
+
+Modelo com as variáveis mais significativas do Teste da Razão de Verossimilhança do Modelo 1
+
+## Treinar o modelo
+
+```{r}
+
+logistico2 <- glm(churn ~ hnd_price+ totmrc_Mean + eqpdays + mou_cvce_Mean +
+                    totmou + avgmou + change_mou +complete_Mean + peak_vce_Mean+
+                    adjmou+ asl_flag_N + refurb_new_N + area_centro_oeste +     area_oeste +
+                    ownrent_O + marital_S +
+                    months + 
+                    drop_vce_Mean +vceovr_Mean + cc_mou_Mean + avg6rev + area_nordeste+
+                    dwlltype_M + dwlltype_S+ cc_mou_Mean+
+                    blck_vce_Mean + roam_Mean + totrev + ownrent_O , 
+                  data= dados_treino1, family = binomial(link = "logit"))
+
+#summary(logistico2)
+```
+
+## Previsão do modelo
+
+```{r}
+pred_log2 <- predict(logistico2, newdata = dados_treino1)
+```
+
+## Matriz de Confusão
+
+```{r}
+# Ponto de corte = 0.4
+#Ponto de Corte: Transformar as probabilidades em rótulos de classe (0 ou 1) com base em um ponto de corte típico de 0.4
+#OBS: se o valor da variável pred_log2 for maior ou igual a 0.4, então prob_log2 recebe o valor 1, caso contrário, recebe o valor 0
+prob_log2 <- ifelse(pred_log2 >= 0.4, 1, 0)
+prob_log2 <- as.factor(prob_log2)
+
+#Criar uma tabela com todos os dados e o ponto de corte
+df_log2 <- cbind(dados_treino1, prob_log2) #Unir ponto de corte e dados_treino1
+#Mudar a posição do de prob_log2(ponto de corte) para que fique ao lado de churn
+df_log2 <- df_log2 %>% select(1, 56, 2:55)
+
+#Para visualizar
+df_log2a <- df_log2 %>% select(1:4) 
+head(df_log2a)
+
+# Vetor com os valores verdadeiros de churn
+verdadeiro <- factor(dados_treino1$churn)
+
+
+# Criar a matriz de confusão
+matrix_log2 <- confusionMatrix(prob_log2, verdadeiro, positive = "1")
+matrix_log2$table
+```
+
+## Métricas
+
+```{r}
+# Calcular a precisão
+precision_log2 <- matrix_log2$byClass["Pos Pred Value"]
+
+# Calcular a revocação
+recall_log2 <- matrix_log2$byClass["Sensitivity"]
+
+# Calcular o F1-Score
+f1_score_log2 <- 2 * (precision_log2 * recall_log2) / (precision_log2 + recall_log2)
+
+#Calcular Teste KS
+ks_log2 <- ks.test(pred_log2, as.numeric(verdadeiro))
+
+# Exibir as métricas
+cat("Precision:", precision_log2, "\n")
+cat("Recall:", recall_log2, "\n")
+cat("F1-Score:", f1_score_log2, "\n")
+cat("Valor do KS:", ks_log2$statistic, "\n")
+```
+
+## Curva ROC
+
+```{r}
+# Calcule a curva ROC
+roc_log2 <- roc(dados_treino1$churn, pred_log2)
+
+
+# Calcule o AUC
+auc_log2<- auc(roc_log2)
+auc_log2
+
+```
+
+```{r}
+# Criar um gráfico da curva ROC 
+par(mar = c(5, 5, 4, 2) + 0.1)  # Ajustar as margens
+plot(roc_log2, col = "blue", main = "Curva ROC ", print.thres = T)
+legend("bottomright", legend = c("Modelo 2"), col = c("blue"), lwd = 2)
+
+```
+
+# ANOVA entre Modelo 1 e Modelo 2
+
+```{r}
+# Comparando modelo menor com o maior
+#Queremos descobrir se as varivaveis que omitimos do modelo menor são significativas
+anova(logistico2, logistico1, test="LRT") # se valor p > niv.sig., as variáveis omitidas não são significativas 
+# pode ser Chisq no lugar de LRT
+
+#O p-valor valor foi MAIOR que o nível de significancia de 0.05. 
+#Isso significa que o modelo NÃO omitiu variaveis significativas
+```
+
+# Logistico 3
+
+Modelo com as variáveis selecionadas automáticamente pela função setp() cujo critério de seleção é Akaike information criterion (AIC). O modelo mais adequado de acordo com a AIC é aquele que explica a maior quantidade de variação usando o menor número possível de variáveis independentes.
+
+```{r}
+#Seleção automatica das variaveis
+#step_log3 <- step(logistico1, direction = "backward") # baseado no AIC
+#summary(step_log3)
+```
+
+## Treinar o modelo
+
+```{r}
+logistico3 <- glm(formula = churn ~ months + drop_vce_Mean + blck_vce_Mean + 
+                    hnd_price + avgqty + rev_Mean + totmrc_Mean + eqpdays + mou_cvce_Mean + 
+                    totmou + avgmou + vceovr_Mean + change_mou + roam_Mean + 
+                    cc_mou_Mean + peak_vce_Mean + totrev + adjmou + avg6rev + 
+                    asl_flag_N + refurb_new_N + area_centro_oeste + area_nordeste + 
+                    area_sudeste + area_sudoeste + ownrent_O + dwlltype_S + marital_B + 
+                    marital_M + marital_S, family = binomial(link = "logit"), 
+                  data = dados_treino1)
+
+```
+
+## Previsão do modelo
+
+```{r}
+pred_log3 <- predict(logistico3, newdata = dados_treino1)
+```
+
+## Matriz de confusão
+
+```{r}
+# Ponto de corte = 0.4
+#Ponto de Corte: Transformar as probabilidades em rótulos de classe (0 ou 1) com base em um ponto de corte típico de 0.4
+prob_log3 <- ifelse(pred_log3 >= 0.4, 1, 0)
+prob_log3 <- as.factor(prob_log3)
+```
+
+```{r}
+#Criar uma tabela com todos os dados e o ponto de corte
+df_log3 <- cbind(dados_treino1, prob_log3) #Unir ponto de corte e dados_treino1
+#Mudar a posição do de prob_log3(ponto de corte) para que fique ao lado de churn
+df_log3 <- df_log3 %>% select(1, 56, 2:55)
+#Para visualizar
+df_log3a <- df_log3 %>% select(1:4) 
+head(df_log3a)
+```
+
+```{r}
+# Vetor com os valores verdadeiros de churn
+verdadeiro <- factor(dados_treino1$churn)
+
+# Criar a matriz de confusão
+matrix_log3 <- confusionMatrix(prob_log3, verdadeiro, positive = "1")
+matrix_log3$table
+```
+
+## Métricas
+
+```{r}
+# Calcular a precisão
+precision_log3 <- matrix_log3$byClass["Pos Pred Value"]
+
+# Calcular a revocação
+recall_log3 <- matrix_log3$byClass["Sensitivity"]
+
+# Calcular o F1-Score
+f1_score_log3 <- 2 * (precision_log3 * recall_log3) / (precision_log3 + recall_log3)
+
+#Calcular Teste KS
+ks_log3 <- ks.test(pred_log3, as.numeric(verdadeiro))
+
+
+# Exibir as métricas
+cat("Precision:", precision_log3, "\n")
+cat("Recall:", recall_log3, "\n")
+cat("F1-Score:", f1_score_log3, "\n")
+cat("Valor do KS:", ks_log3$statistic, "\n")
+
+
+```
+
+## Curva ROC
+
+```{r}
+# Calcule a curva ROC
+roc_log3 <- roc(dados_treino1$churn, pred_log3)
+
+# Calcule o AUC
+auc_log3<- auc(roc_log3)
+auc_log3
+
+```
+
+O melhor ponto de corte é de -0.158
+
+-   Specifity= 0.488;
+
+-   Sensibility= 0.681
+
+```{r}
+# Criar um gráfico da curva ROC 
+par(mar = c(5, 5, 4, 2) + 0.1)  # Ajustar as margens
+plot(roc_log3, col = "#2C0E87", main = "Curva ROC ", print.thres = T)
+legend("bottomright", legend = c("Modelo 3"), col = c("#2C0E87"), lwd = 2)
+
+```
+
+# ANOVA entre Modelo 3 e Modelo 1
+
+```{r}
+#Comparar os modleos
+anova(logistico3, logistico1, test="LRT") # a variável Embarked pode ser excluída
+#O p-valor valor foi MAIOR que o nível de significancia de 0.05. 
+#Isso significa que o modelo NÃO omitiu variaveis significativas
+```
+
+# Logistico 4
+
+Seleção automática com base nas 15 melhores variaveis do Modelo 2
+
+## 1º) ANOVA do Modelo 2
+
+```{r}
+#1. Utilizando Anova
+anova(logistico2, test="Chisq")
+# adiciona as variáveis sequencialmente (a variável adcional melhora o modelo?)
+
+#2.Utilizando Drop1
+drop1(logistico2, test="Chisq")
+# remove as variáveis sequencialmente (a variável adcional melhora o modelo?)
+
+#As melhores varivaveis são:
+dados_best1 <- dados_treino1 %>% select(
+"hnd_price", "totmrc_Mean", "eqpdays", "avgmou", "change_mou", "complete_Mean",
+"asl_flag_N", "vceovr_Mean", "refurb_new_N", "area_centro_oeste", "months",
+"area_oeste" , "drop_vce_Mean", "peak_vce_Mean", "blck_vce_Mean", "churn"
+)
+
+```
+
+## 2º) Seleção Automática
+
+A seleção terá como critério Bayesian information criterion (BIC). Ele é similiar ao AIC, porém penaliza com mais rigor modelos complexos.
+
+```{r}
+#best1 <- bestglm(Xy =dados_best1, IC = "BIC", TopModels = 5 ,family = binomial(link = "logit"))
+#print.bestglm(best1)
+#summary.bestglm(best1)
+```
+
+## Treinar o modelo
+
+O modelo será treinado com as variáveis encontradas na etapa anterior
+
+```{r}
+logistico4 <- glm(churn ~ hnd_price+totmrc_Mean+ eqpdays+ avgmou +
+                    change_mou+ complete_Mean + asl_flag_N+ vceovr_Mean +
+                    refurb_new_N+ area_centro_oeste + months +
+                    area_oeste + drop_vce_Mean+ blck_vce_Mean,
+                  data= dados_treino1, family = binomial(link = "logit"))
+```
+
+## Previsão do modelo
+
+```{r}
+
+pred_log4 <- predict(logistico4, newdata = dados_treino1)
+```
+
+## Matriz de Confusão
+
+```{r}
+# Ponto de corte = 0.4
+#Ponto de Corte: Transformar as probabilidades em rótulos de classe (0 ou 1) com base em um ponto de corte típico de 0.4
+prob_log4 <- ifelse(pred_log4 >= 0.4, 1, 0)
+prob_log4 <- as.factor(prob_log4)
+
+#Criar uma tabela com todos os dados e o ponto de corte
+df_log4 <- cbind(dados_treino1, prob_log4) #Unir ponto de corte e dados_treino1
+#Mudar a posição do de prob_log4(ponto de corte) para que fique ao lado de churn
+df_log4 <- df_log4 %>% select(1, 56, 2:55)  
+#Para visualizar
+df_log4a <- df_log4 %>% select(1:4) 
+head(df_log4a)
+
+verdadeiro <- factor(dados_treino1$churn)
+
+
+# Criar a matriz de confusão
+matrix_log4 <- confusionMatrix(prob_log4, verdadeiro, positive = "1")
+matrix_log4$table
+
+```
+
+## Métricas
+
+```{r}
+# Calcular a precisão
+precision_log4 <- matrix_log4$byClass["Pos Pred Value"]
+
+# Calcular a revocação
+recall_log4 <- matrix_log1$byClass["Sensitivity"]
+
+# Calcular o F1-Score
+f1_score_log4 <- 2 * (precision_log4 * recall_log4) / (precision_log4 + recall_log4)
+
+#Calcular Teste KS
+ks_log4 <- ks.test(pred_log4, as.numeric(verdadeiro))
+
+
+# Exibir as métricas
+cat("Precision:", precision_log4, "\n")
+cat("Recall:", recall_log4, "\n")
+cat("F1-Score:", f1_score_log4, "\n")
+cat("Valor do KS:", ks_log4$statistic, "\n")
+
+```
+
+## Curva ROC
+
+```{r}
+# Calcule a curva ROC
+roc_log4 <- roc(dados_treino1$churn, pred_log4)
+
+# Calcule o AUC
+auc_log4<- auc(roc_log4)
+auc_log4
+
+```
+
+```{r}
+# Criar um gráfico da curva ROC 
+par(mar = c(5, 5, 4, 2) + 0.1)  # Ajustar as margens
+plot(roc_log4, col = "#FF8E00", main = "Curva ROC ", print.thres = T)
+legend("bottomright", legend = c("Modelo 4"), col = c("#FF8E00"), lwd = 2)
+# obs: print.thres = T :descobrimos o ponto de corte que fornece melhor soma de S e E
+```
+
+# Logistico 5
+
+Variáveis selecionadas automaticamente pela função Boruta
+
+## Treinar o modelo
+
+```{r}
+logistico5 <- glm(churn ~ months + drop_vce_Mean + blck_vce_Mean + hnd_price+
+                    avgqty+ rev_Mean+ totmrc_Mean + eqpdays + 
+                    ovrmou_Mean + mou_cvce_Mean + totmou + avgmou +
+                    vceovr_Mean + ovrrev_Mean + change_mou + roam_Mean +
+                    cc_mou_Mean+ complete_Mean + peak_vce_Mean + unan_vce_Mean +
+                    plcd_vce_Mean + totcalls + totrev + adjmou +
+                    adjqty + avg6rev + asl_flag_N + asl_flag_Y + refurb_new_N+
+                    refurb_new_R + hnd_webcap_WC + hnd_webcap_WCMB , 
+                    data= dados_treino1,
+                    family = binomial(link = "logit"))
+#summary(logistico5)
+```
+
+## Previsão do modelo
+
+```{r}
+pred_log5 <- predict(logistico5, newdata = dados_treino1)
+```
+
+## Matriz de Confusão
+
+```{r}
+# Ponto de corte = 0.4
+#Ponto de Corte: Transformar as probabilidades em rótulos de classe (0 ou 1) com base em um ponto de corte típico de 0.4
+prob_log5 <- ifelse(pred_log5 >= 0.4, 1, 0)
+prob_log5 <- as.factor(prob_log5)
+
+#Criar uma tabela com todos os dados e o ponto de corte
+df_log5 <- cbind(dados_treino1, prob_log5) #Unir ponto de corte e dados_treino1
+
+df_log5 <- df_log5 %>% select(1, 56, 2:55)
+#Para visualizar
+df_log5a <- df_log5 %>% select(1:4) 
+head(df_log5a)
+
+# Vetor com os valores verdadeiros de churn
+verdadeiro <- factor(dados_treino1$churn)
+
+
+# Criar a matriz de confusão
+matrix_log5 <- confusionMatrix(prob_log5, verdadeiro, positive = "1")
+matrix_log5$table
+
+```
+
+## Métricas
+
+```{r}
+# Calcular a precisão
+precision_log5 <- matrix_log5$byClass["Pos Pred Value"]
+
+# Calcular a revocação
+recall_log5 <- matrix_log5$byClass["Sensitivity"]
+
+# Calcular o F1-Score
+f1_score_log5 <- 2 * (precision_log5 * recall_log5) / (precision_log5 + recall_log5)
+
+#Calcular Teste KS
+ks_log5 <- ks.test(pred_log5, as.numeric(verdadeiro))
+
+
+# Exibir as métricas
+cat("Precision:", precision_log5, "\n")
+cat("Recall:", recall_log5, "\n")
+cat("F1-Score:", f1_score_log5, "\n")
+cat("Valor do KS:", ks_log5$statistic, "\n")
+
+```
+
+## Curva ROC
+
+```{r}
+# Calcule a curva ROC
+roc_log5 <- roc(dados_treino1$churn, pred_log5)
+roc_log5 
+
+# Calcule o AUC
+auc_log5<- auc(roc_log5)
+auc_log5
+```
+
+```{r}
+# Criar um gráfico da curva ROC 
+par(mar = c(5, 5, 4, 2) + 0.1)  # Ajustar as margens
+plot(roc_log5, col = "#057D9F", main = "Curva ROC ", print.thres = T)
+legend("bottomright", legend = c("Modelo 5"), col = c( "#057D9F"), lwd = 2)
+# obs: print.thres = T :descobrimos o ponto de corte que fornece melhor soma de S e E
+```
+
+# Logistico 6
+
+Selecionada as variáves do modelo que 1 em que $|Estimate|>|Std.Error|$, também foram excluídas variáveis com NA em Estimate e Std. Error.
+
+## Treinar o modelo
+
+```{r}
+logistico6 <- glm(churn ~ months + drop_vce_Mean +  blck_vce_Mean +  hnd_price + avgqty + rev_Mean + totmrc_Mean + eqpdays + mou_cvce_Mean + totmou + avgmou + change_mou+ income + roam_Mean + cc_mou_Mean + peak_vce_Mean + totrev + adjmou+ avg6rev +  asl_flag_N+ refurb_new_N+ hnd_webcap_WC+ new_cell_N + ownrent_O+  ownrent_R + dwlltype_S + marital_A + marital_B + marital_M+ marital_S+ creditcd_N, data= dados_treino1, family = binomial(link = "logit"))
+
+```
+
+## Previsão do modelo
+
+```{r}
+pred_log6 <- predict(logistico6, newdata = dados_treino1)
+```
+
+## Matriz de Confusão
+
+```{r}
+# Ponto de corte = 0.4
+#Ponto de Corte: Transformar as probabilidades em rótulos de classe (0 ou 1) com base em um ponto de corte típico de 0.4
+prob_log6 <- ifelse(pred_log6 >= 0.4, 1, 0)
+prob_log6 <- as.factor(prob_log6)
+
+#Criar uma tabela com todos os dados e o ponto de corte
+df_log6 <- cbind(dados_treino1, prob_log6) #Unir ponto de corte e dados_treino1
+
+df_log6 <- df_log6 %>% select(1, 56, 2:55)
+#Para visualizar
+df_log6a <- df_log6 %>% select(1:4) 
+head(df_log6a)
+
+# Vetor com os valores verdadeiros de churn
+verdadeiro <- factor(dados_treino1$churn)
+
+
+# Criar a matriz de confusão
+matrix_log6 <- confusionMatrix(prob_log6, verdadeiro, positive = "1")
+matrix_log6$table
+
+```
+
+## Métricas
+
+```{r}
+# Calcular a precisão
+precision_log6 <- matrix_log6$byClass["Pos Pred Value"]
+
+# Calcular a revocação
+recall_log6 <- matrix_log6$byClass["Sensitivity"]
+
+# Calcular o F1-Score
+f1_score_log6 <- 2 * (precision_log6 * recall_log6) / (precision_log6 + recall_log6)
+
+#Calcular Teste KS
+ks_log6 <- ks.test(pred_log6, as.numeric(verdadeiro))
+
+
+# Exibir as métricas
+cat("Precision:", precision_log6, "\n")
+cat("Recall:", recall_log6, "\n")
+cat("F1-Score:", f1_score_log6, "\n")
+cat("Valor do KS:", ks_log6$statistic, "\n")
+```
+
+## Curva ROC
+
+```{r}
+# Calcule a curva ROC
+roc_log6 <- roc(dados_treino1$churn, pred_log6)
+roc_log6 
+
+# Calcule o AUC
+auc_log6<- auc(roc_log6)
+auc_log6
+```
+
+# Random Forest 1
+
+## Treinar o modelo
+
+```{r}
+set.seed(123)
+rf1 <- randomForest(churn ~ ., data= dados_treino1, importance= T, ntree = 100, 
+                    mtry = 8, nodesize= 50, type = "classification")
+
+#rf1
+#summary(rf1)
+```
+
+## Importância das variáveis
+
+### Incremento na taxa de erro médio quadrático (%IncMSE)
+
+```{r}
+# MeanDecreaseAccuracy: permutação
+imp_rf1a <-importance(rf1, type = 1)
+#OBS:Resultado mostra a importância relativa de cada variável no modelo,
+#medida em termos de "Incremento na taxa de erro médio quadrático (%IncMSE)"
+
+#OBS:type=1 especifica que as pontuações de importância devem ser calculadas 
+#com base na diminuição média da impureza.
+
+```
+
+**Variáveis com maior importância:** 1. months (28.11%IncMSE), 2. eqpdays (28.49%IncMSE), 3. change_mou (28.28%IncMSE), 4.avgqty (21.11%IncMSE), 5.totmou (19.63%IncMSE), 6. peak_vce_Mean (20.33%IncMSE), 7. totcalls (16.75%IncMSE), 8. totrev (17.14%IncMSE), 9.rev_Mean (19.39%IncMSE), 10. ovrmou_Mean (19.67%IncMSE) 11.avgmou (18.74%IncMSE), 12. mou_cvce_Mean (18.28%IncMSE), 13. vceovr_Mean (15.21%IncMSE), 14. drop_vce_Mean (12.92%IncMSE), 15. hnd_price (11.77%IncMSE)
+
+```{r}
+# Converter a importância das variáveis em um data frame
+df_imp_rf1a<- data.frame(variaveis = rownames(imp_rf1a ), importancia = imp_rf1a[, 1])
+
+
+#Ranking com as 20 variaveis mais importantes
+ranking_df_imp_rf1a<- df_imp_rf1a %>%
+  arrange(desc(importancia)) %>%
+  head(20) 
+
+#ranking_df_imp_rf1a
+```
+
+```{r}
+# Criar o gráfico de barras
+df_imp_rf1a %>%
+  arrange(desc(importancia)) %>% # Classificar por importância (ascendente)
+  head(20) %>% 
+  ggplot(aes(y = reorder(variaveis, importancia), x = importancia)) +
+  geom_bar(stat = "identity", fill = "#9F2042") + # fill : Definir a cor de preenchimento
+  labs(title = "Importância das 20 Melhores Variáveis",
+       x = "Variável",
+       y = "Importância") +
+  theme_gray()+
+  scale_x_continuous(breaks = seq(0, max(df_imp_rf1a$importancia), by = 30)) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+```
+
+### Índice Gini
+
+O Índice Gini é uma métrica usada para medir a impureza nos nós da árvore de decisão. Valores mais altos indicam maior impureza. No código a seguir, as variáveis são classificadas com base no Índice Gini, o que significa que as variáveis com maiores valores de "IncNodePurity" contribuem mais para a redução da impureza nos nós da árvore de decisão.
+
+```{r}
+# MeanDecreaseGini: diminuição total nas impurezas do nó da divisão na variável, calculada em média para todas as árvores
+#Avaliação das impurezas pór meio do Índice Gini
+imp_rf1b <- importance(rf1, type = 2)
+
+
+# Converter a importância das variáveis em um data frame
+df_imp_rf1b<- data.frame(variaveis = rownames(imp_rf1b ), importancia = imp_rf1b[, 1])
+
+
+#Ranking com as 20 variaveis mais importantes
+ranking_df_imp_rf1b<- df_imp_rf1b %>%
+  arrange(desc(importancia)) %>%
+  head(20) 
+
+#ranking_df_imp_rf1b
+```
+
+**Variáveis com maior importância:** 1. eqpdays (385.37) 2. months (291.22) 3. change_mou (284.93) 4. mou_cvce_Mean (210.31) 5. totrev (210.54) 6. avgqty (184.63) 7. rev_Mean (182.48) 8. totmou (161.57) 9. avgmou (177.54) 10. totcalls (169.18) 11. adjmou (163.65) 12. peak_vce_Mean (161.55) 13. plcd_vce_Mean (160.82) 14. unan_vce_Mean (146.56) 15. avg6rev (139.40) 16. drop_vce_Mean (123.70) 17. ovrmou_Mean (109.16) 18. hnd_price (102.51) 19. vceovr_Mean (99.66) 20. blck_vce_Mean (98.37)
+
+```{r}
+# Criar o gráfico de barras
+df_imp_rf1b %>%
+  arrange(desc(importancia)) %>% # Classificar por importância (ascendente)
+  head(20) %>% 
+  ggplot(aes(y = reorder(variaveis, importancia), x = importancia)) +
+  geom_bar(stat = "identity", fill = "#9F2042") + # fill : Definir a cor de preenchimento
+  labs(title = "Importância das 20 Melhores Variáveis",
+       x = "Variável",
+       y = "Importância") +
+  theme_gray()+
+  scale_x_continuous(breaks = seq(0, max(df_imp_rf1b$importancia), by = 30)) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+```
+
+```{r}
+# Gráfico da importância das variáveis
+#Um gráfico para as duas medidas
+varImpPlot(rf1, sort = T)
+```
+
+## Predição
+
+```{r}
+pred_rf1 <- predict(rf1, newdata = dados_treino1,  type = "response")
+```
+
+## Matriz de Confusão
+
+```{r}
+# Ponto de corte = 0.4
+#Ponto de Corte: Transformar as probabilidades em rótulos de classe (0 ou 1) com base em um ponto de corte típico de 0.4
+prob_rf1 <- ifelse(pred_rf1 >= 0.4, 1, 0)
+prob_rf1 <- as.factor(prob_rf1)
+
+#Criar uma tabela com todos os dados e o ponto de corte
+df_rf1 <- cbind(dados_treino1, prob_rf1) #Unir ponto de corte e dados_treino1
+#Mudar a posição do de prob_log3(ponto de corte) para que fique ao lado de churn
+df_rf1 <- df_rf1 %>% select(1, 56, 2:55)  
+#Para visualizar
+df_rf1a <- df_rf1 %>% select(1:4) 
+head(df_rf1a)
+
+verdadeiro <- factor(dados_treino1$churn)
+
+
+# Criar a matriz de confusão
+matrix_rf1 <- confusionMatrix(prob_rf1, verdadeiro, positive = "1")
+matrix_rf1$table
+
+```
+
+## Métricas
+
+```{r}
+# Calcular a precisão
+precision_rf1 <- matrix_rf1$byClass["Pos Pred Value"]
+
+# Calcular a revocação
+recall_rf1 <- matrix_rf1$byClass["Sensitivity"]
+
+# Calcular o F1-Score
+f1_score_rf1 <- 2 * (precision_rf1 * recall_rf1) / (precision_rf1 + recall_rf1)
+
+#Calcular Teste KS
+ks_rf1 <- ks.test(pred_rf1, as.numeric(verdadeiro))
+
+# Exibir as métricas
+cat("Precision:", precision_rf1, "\n")
+cat("Recall:", recall_rf1, "\n")
+cat("F1-Score:", f1_score_rf1, "\n")
+cat("Valor do KS:", ks_rf1$statistic, "\n")
+
+
+# Calcule a curva ROC
+roc_rf1 <- roc(dados_treino1$churn, pred_rf1)
+roc_rf1 
+
+# Calcule o AUC
+auc_rf1<- auc(roc_rf1)
+auc_rf1
+
+```
+
+## Gráfico da curva ROC
+
+```{r}
+# Criar um gráfico da curva ROC 
+par(mar = c(5, 5, 4, 2) + 0.1)  # Ajustar as margens
+plot(roc_rf1, col = "blue", main = "Curva ROC", print.thres = T)
+legend("bottomright", legend = c("Modelo 2"), col = c("blue"), lwd = 2)
+
+```
+
+# Random Forest 2
+
+Seleção das 10 variáveis mais importantes do Modelo 1 , de acordo com índice Gini.
+
+## Treinar o modelo
+
+```{r}
+### 10 variaveis
+set.seed(123)
+rf2 <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                      mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                      totcalls + adjqty, data= dados_treino1, importance= T, ntree = 100, mtry = 8, nodesize= 50, type = "classification")
+
+#rf2
+
+#summary(rf2)
+
+```
+
+#### Previsão do Modelo rf2
+
+```{r}
+pred_rf2 <- predict(rf2, newdata = dados_treino1)
+```
+
+#### Matriz de Confusão
+
+```{r}
+# Ponto de corte = 0.5
+#Ponto de Corte: Transformar as probabilidades em rótulos de classe (0 ou 1) com base em um ponto de corte típico de 0.5
+prob_rf2 <- ifelse(pred_rf2 >= 0.4, 1, 0)
+prob_rf2 <- as.factor(prob_rf2)
+
+#Criar uma tabela com todos os dados e o ponto de corte
+df_rf2 <- cbind(dados_treino1, prob_rf2) #Unir ponto de corte e dados_treino1
+#Mudar a posição do de prob_log3(ponto de corte) para que fique ao lado de churn
+df_rf2 <- df_rf2 %>% select(1, 56, 2:55)
+#Para visualizar
+df_rf2a <- df_rf2 %>% select(1:4) 
+head(df_rf2a)
+
+
+
+# Vetor com os valores verdadeiros de churn
+verdadeiro <- factor(dados_treino1$churn)
+
+
+# Criar a matriz de confusão
+matrix_rf2 <- confusionMatrix(prob_rf2, verdadeiro, positive = "1")
+matrix_rf2$table
+
+```
+
+#### Métricas
+
+```{r}
+# Calcular a precisão
+precision_rf2 <- matrix_rf2$byClass["Pos Pred Value"]
+
+# Calcular a revocação
+recall_rf2 <- matrix_rf2$byClass["Sensitivity"]
+
+# Calcular o F1-Score
+f1_score_rf2 <- 2 * (precision_rf2 * recall_rf2) / (precision_rf2 + recall_rf2)
+
+
+#Calcular Teste KS
+ks_rf2 <- ks.test(pred_rf2, as.numeric(verdadeiro))
+
+# Exibir as métricas
+cat("Precision:", precision_rf2, "\n")
+cat("Recall:", recall_rf2, "\n")
+cat("F1-Score:", f1_score_rf2, "\n")
+cat("Valor do KS:", ks_rf2$statistic, "\n")
+```
+
+#### Curva ROC
+
+```{r}
+# Calcule a curva ROC
+roc_rf2 <- roc(dados_treino1$churn, pred_rf2)
+roc_rf2 
+
+# Calcule o AUC
+auc_rf2<- auc(roc_rf2)
+auc_rf2
+```
+
+```{r}
+# Criar um gráfico da curva ROC 
+par(mar = c(5, 5, 4, 2) + 0.1)  # Ajustar as margens
+plot(roc_rf2, col = "#9F2042", main = "Curva ROC",  print.thres = T)
+legend("bottomright", legend = c("Modelo 2"), col = c("#9F2042"), lwd = 2)
+
+# obs: print.thres = T :descobrimos o ponto de corte que fornece melhor soma de S e E
+```
+
+# Random Forest 3
+
+Seleção das 15 variáveis mais importantes do Modelo 1 , de acordo com índice Gini.
+
+## Treinar o modelo
+
+```{r}
+### 15 variaveis
+set.seed(123)
+rf3 <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                      mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                      totcalls + adjqty + rev_Mean +  avgmou + totcalls +
+                      adjqty + adjmou , data= dados_treino1, importance= T, ntree = 100, 
+                    mtry = 8, nodesize= 50, type = "classification")
+
+rf3
+summary(rf3)
+```
+
+## Gráfico da importância das variáveis
+
+```{r}
+# Gráfico da importância das variáveis
+#Um gráfico para as duas medidas
+varImpPlot(rf3, sort = T)
+```
+
+## Previsão
+
+```{r}
+pred_rf3 <- predict(rf3, newdata = dados_treino1,  type = "response")
+```
+
+## Matriz de Confusão
+
+```{r}
+# Ponto de corte = 0.4
+#Ponto de Corte: Transformar as probabilidades em rótulos de classe (0 ou 1) com base em um ponto de corte típico de 0.4
+prob_rf3 <- ifelse(pred_rf3 >= 0.4, 1, 0)
+prob_rf3 <- as.factor(prob_rf3)
+
+#Criar uma tabela com todos os dados e o ponto de corte
+df_rf3 <- cbind(dados_treino1, prob_rf3) #Unir ponto de corte e dados_treino1
+#Mudar a posição do de prob_log3(ponto de corte) para que fique ao lado de churn
+df_rf3 <- df_rf3 %>% select(1, 56, 2:55)  
+#Para visualizar
+df_rf3a <- df_rf3 %>% select(1:4) 
+head(df_rf3a)
+
+
+verdadeiro <- factor(dados_treino1$churn)
+
+
+# Criar a matriz de confusão
+matrix_rf3 <- confusionMatrix(prob_rf3, verdadeiro, positive = "1")
+matrix_rf3$table
+
+```
+
+## Métricas
+
+```{r}
+# Calcular a precisão
+precision_rf3 <- matrix_rf3$byClass["Pos Pred Value"]
+
+# Calcular a revocação
+recall_rf3 <- matrix_rf3$byClass["Sensitivity"]
+
+# Calcular o F1-Score
+f1_score_rf3 <- 2 * (precision_rf3 * recall_rf3) / (precision_rf3 + recall_rf3)
+
+#Calcular Teste KS
+ks_rf3 <- ks.test(pred_rf3, as.numeric(verdadeiro))
+
+# Exibir as métricas
+cat("Precision:", precision_rf3, "\n")
+cat("Recall:", recall_rf3, "\n")
+cat("F1-Score:", f1_score_rf3, "\n")
+cat("Valor do KS:", ks_rf3$statistic, "\n")
+
+
+# Calcule a curva ROC
+roc_rf3 <- roc(dados_treino1$churn, pred_rf3)
+roc_rf3 
+
+# Calcule o AUC
+auc_rf3<- auc(roc_rf3)
+auc_rf3
+
+```
+
+## Gráfico da curva ROC
+
+```{r}
+# Criar um gráfico da curva ROC 
+par(mar = c(5, 5, 4, 2) + 0.1)  # Ajustar as margens
+plot(roc_rf3, col = "blue", main = "Curva ROC", print.thres = T)
+legend("bottomright", legend = c("Modelo 2"), col = c("blue"), lwd = 2)
+
+```
+
+# Random Forest 4
+
+## Treinar o modelo
+
+```{r}
+### 20 variaveis
+set.seed(123)
+rf4 <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                      mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                      totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                      peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                      avg6rev + drop_vce_Mean + ovrmou_Mean , data= dados_treino1, importance= T, ntree = 100, 
+                    mtry = 8, nodesize= 50, type = "classification")
+
+```
+
+## Gráfico da importância das variáveis
+
+```{r}
+# Gráfico da importância das variáveis
+#Um gráfico para as duas medidas
+varImpPlot(rf4, sort = T)
+
+```
+
+## Previsão
+
+```{r}
+pred_rf4 <- predict(rf4, newdata = dados_treino1,  type = "response")
+```
+
+## Matriz de Confusão
+
+```{r}
+# Ponto de corte = 0.4
+#Ponto de Corte: Transformar as probabilidades em rótulos de classe (0 ou 1) com base em um ponto de corte típico de 0.4
+prob_rf4 <- ifelse(pred_rf4 >= 0.4, 1, 0)
+prob_rf4 <- as.factor(prob_rf4)
+
+#Criar uma tabela com todos os dados e o ponto de corte
+df_rf4 <- cbind(dados_treino1, prob_rf4) #Unir ponto de corte e dados_treino1
+#Mudar a posição do de prob_log3(ponto de corte) para que fique ao lado de churn
+df_rf4 <- df_rf4 %>% select(1, 56, 2:55)  
+#Para visualizar
+df_rf4a <- df_rf4 %>% select(1:4) 
+head(df_rf4a)
+
+verdadeiro <- factor(dados_treino1$churn)
+
+
+# Criar a matriz de confusão
+matrix_rf4 <- confusionMatrix(prob_rf4, verdadeiro, positive = "1")
+matrix_rf4$table
+
+```
+
+## Métricas
+
+```{r}
+# Calcular a precisão
+precision_rf4 <- matrix_rf4$byClass["Pos Pred Value"]
+
+# Calcular a revocação
+recall_rf4 <- matrix_rf4$byClass["Sensitivity"]
+
+# Calcular o F1-Score
+f1_score_rf4 <- 2 * (precision_rf4 * recall_rf4) / (precision_rf4 + recall_rf4)
+
+#Calcular Teste KS
+ks_rf4 <- ks.test(pred_rf4, as.numeric(verdadeiro))
+
+# Exibir as métricas
+cat("Precision:", precision_rf4, "\n")
+cat("Recall:", recall_rf4, "\n")
+cat("F1-Score:", f1_score_rf4, "\n")
+cat("Valor do KS:", ks_rf4$statistic, "\n")
+
+
+# Calcular a curva ROC
+roc_rf4 <- roc(dados_treino1$churn, pred_rf4)
+roc_rf4 
+
+# Calcular o AUC
+auc_rf4<- auc(roc_rf4)
+auc_rf4
+
+```
+
+## Gráfico da curva ROC
+
+```{r}
+# Criar um gráfico da curva ROC 
+par(mar = c(5, 5, 4, 2) + 0.1)  # Ajustar as margens
+plot(roc_rf4, col = "blue", main = "Curva ROC", print.thres = T)
+legend("bottomright", legend = c("Modelo 2"), col = c("blue"), lwd = 2)
+
+```
+
+# Boruta
+
+Boruta é um algoritmo wrapper de seleção de recursos totalmente relevante, capaz de funcionar com qualquer método de classificação que produza medida de importância variável (VIM); por padrão, **Boruta usa Random Forest**. O método realiza uma busca de cima para baixo por características relevantes, comparando a importância dos atributos originais com a importância alcançável aleatoriamente, estimada usando suas cópias permutadas, e eliminando progressivamente características irrelevantes para estabilizar esse teste.
+
+```{r}
+# Converter a variável resposta em um fator (necessário para o Boruta)
+#dados_treino1$churn <- as.factor(dados_treino1$churn)
+
+# Instanciar o objeto Boruta
+#boruta_obj <- Boruta(churn ~ ., data = dados_treino1,  doTrace =  FALSE)
+
+# Exibir as características selecionadas
+#selected_features <- getSelectedAttributes(boruta_obj)
+```
+
+# Random Forest 5
+
+```{r}
+rf5 <- randomForest(churn ~ months + drop_vce_Mean + blck_vce_Mean + hnd_price+
+                      avgqty+ rev_Mean+ totmrc_Mean + eqpdays + 
+                      ovrmou_Mean + mou_cvce_Mean + totmou + avgmou +
+                      vceovr_Mean + ovrrev_Mean + change_mou + roam_Mean +
+                      cc_mou_Mean+ complete_Mean + peak_vce_Mean + unan_vce_Mean +
+                      plcd_vce_Mean + totcalls + totrev + adjmou +
+                      adjqty + avg6rev + asl_flag_N + asl_flag_Y + refurb_new_N+
+                      refurb_new_R + hnd_webcap_WC + hnd_webcap_WCMB , 
+                    data= dados_treino1,
+                    ntree = 100, mtry = 5, nodesize= 50, type = "classification")
+#summary(rf5)
+
+```
+
+## Previsão
+
+```{r}
+pred_rf5 <- predict(rf5, newdata = dados_treino1)
+```
+
+## Matriz de Confusão
+
+```{r}
+# Ponto de corte = 0.4
+#Ponto de Corte: Transformar as probabilidades em rótulos de classe (0 ou 1) com base em um ponto de corte típico de 0.4
+prob_rf5 <- ifelse(pred_rf5 >= 0.4, 1, 0)
+prob_rf5 <- as.factor(prob_rf5)
+
+#Criar uma tabela com todos os dados e o ponto de corte
+df_rf5 <- cbind(dados_treino1, prob_rf5) #Unir ponto de corte e dados_treino1
+#Mudar a posição do de prob_log3(ponto de corte) para que fique ao lado de churn
+df_rf5 <- df_rf5 %>% select(1, 56, 2:55)  
+#Para visualizar
+df_rf5a <- df_rf5 %>% select(1:4) 
+head(df_rf5a)
+
+
+verdadeiro <- factor(dados_treino1$churn)
+
+# Criar a matriz de confusão
+matrix_rf5 <- confusionMatrix(prob_rf5, verdadeiro, positive = "1")
+matrix_rf5$table
+
+```
+
+## Métricas
+
+```{r}
+
+# Calcular a precisão
+precision_rf5 <- matrix_rf5$byClass["Pos Pred Value"]
+
+# Calcular a revocação
+recall_rf5 <- matrix_rf5$byClass["Sensitivity"]
+
+# Calcular o F1-Score
+f1_score_rf5 <- 2 * (precision_rf5 * recall_rf5) / (precision_rf5 + recall_rf5)
+
+# Exibir as métricas
+cat("Precision:", precision_rf5, "\n")
+cat("Recall:", recall_rf5, "\n")
+cat("F1-Score:", f1_score_rf5, "\n")
+
+
+
+# Calcule a curva ROC
+roc_rf5 <- roc(dados_treino1$churn, pred_rf5)
+roc_rf5 
+
+# Calcule o AUC
+auc_rf5<- auc(roc_rf5)
+auc_rf5
+```
+
+## Gráfico da curva ROC
+
+```{r}
+# Criar um gráfico da curva ROC 
+par(mar = c(5, 5, 4, 2) + 0.1)  # Ajustar as margens
+plot(roc_rf5, col = "blue", main = "Curva ROC")
+legend("bottomright", legend = c("Random Forest 5"), col = c("blue"), lwd = 2)
+```
+
+# Resultado Parcial 1
+
+## Ponto de corte = 0,5
+
+![](images/ponto_corte=0,5_parcial1.png)
+
+## Ponto de Corte = 0,4
+
+![](images/ponto_corte=0.4_parcial1.png)
+
+## Gráfico da Curva ROC
+
+```{r}
+par(mar = c(5, 5, 4, 2) + 0.1)  # Ajustar as margens
+plot(roc_log1, col = "#EAB200" , main = "Curva ROC comparando os  Modelos")
+lines(roc_log2, col = "#37AA00")
+lines(roc_log3, col = "#2C0E87")
+lines(roc_log4, col = "#FF8E00")
+lines(roc_log5, col = "#057D9F")
+lines(roc_rf2, col = "#9F2042")
+legend("bottomright", legend = c("Logistico 1", "Logistico 2", "Logistico 3", "Logistico 4", "Logistico 5", "Random Forest"), col = c("#EAB200", "#37AA00"  , "#2C0E87" , "#FF8E00", "#057D9F", "#9F2042"), lwd = 2)
+
+
+```
+
+# Random Forest 4 - Dados de teste
+
+## CrossValidation
+
+### 1ª Forma
+
+```{r}
+### 20 variaveis
+set.seed(123)
+rf4_ta <- randomForest(churn ~ eqpdays + months + change_mou + totrev +
+                      mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+                      totcalls + adjqty+ adjmou + totmrc_Mean + totmou +
+                      peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+                      avg6rev + drop_vce_Mean + ovrmou_Mean , cv=10, data= dados_treino1, importance= T, ntree = 100, 
+                    mtry = 8, nodesize= 50, type = "classification")
+
+```
+
+### 2ª Forma
+
+```{r}
+# Transformar churn em fator
+dados_treino2 <- dados_treino1
+dados_treino2$churn <- as.factor(dados_treino2$churn)
+ 
+```
+
+```{r}
+#controla como a validação cruzada será realizada
+cross_rf4 <- trainControl(method= "cv", number=10) 
+
+```
+
+```{r}
+# Defina um grid de hiperparâmetros para classificação binária com o método Random Forest
+tuneGrid <- data.frame(mtry = c(7, 8, 9))
+
+```
+
+```{r}
+# Execute a função train com o grid de hiperparâmetros
+#rf4_tb <- train(
+#  churn ~ eqpdays + months + change_mou + totrev +
+#  mou_cvce_Mean + avgqty + rev_Mean + avgmou +
+#  totcalls + adjqty + adjmou + totmrc_Mean + totmou +
+#  peak_vce_Mean + plcd_vce_Mean + complete_Mean + unan_vce_Mean +
+#  avg6rev + drop_vce_Mean + ovrmou_Mean, 
+#  data = dados_treino2, 
+#  trControl = cross_rf4, 
+#  method = 'rf',
+#  nodesize = 50,
+#  tuneGrid = tuneGrid,
+#  metric = "F1"  #  métrica de avaliação
+#)
+
+```
+
+```{r}
+#rf4_tb$finalModel$confusion
+```
+
+## Previsão
+
+```{r}
+pred_rf4_ta <- predict(rf4_ta, newdata = dados_teste1,  type = "response")
+```
+
+```{r}
+#pred_rf4_tb <- predict(rf4_tb, newdata = dados_teste1,  type = "prob")
+```
+
+## Matriz de Confusão
+
+```{r}
+# Ponto de corte = 0.4
+#Ponto de Corte: Transformar as probabilidades em rótulos de classe (0 ou 1) com base em um ponto de corte típico de 0.4
+prob_rf4_ta <- ifelse(pred_rf4_ta >= 0.4, 1, 0)
+prob_rf4_ta <- as.factor(prob_rf4_ta)
+
+verdadeiro <- factor(dados_teste1$churn)
+```
+
+```{r}
+#Criar uma tabela com todos os dados e o ponto de corte
+df_rf4_ta <- cbind(dados_teste1, prob_rf4_ta) #Unir ponto de corte e dados_treino1
+#Mudar a posição do de prob_log3(ponto de corte) para que fique ao lado de churn
+df_rf4_ta <- df_rf4_ta %>% select(1, 56, 2:55)
+#Para visualizar
+df_rf4a_ta<- df_rf4_ta %>% select(1:4) 
+head(df_rf4a_ta)
+
+
+verdadeiro <- factor(dados_teste1$churn)
+
+
+# Criar a matriz de confusão
+matrix_rf4_ta <- confusionMatrix(prob_rf4_ta, verdadeiro, positive = "1")
+matrix_rf4_ta$table
+
+```
+
+## Métricas
+
+```{r}
+# Calcular a precisão
+precision_rf4_ta <- matrix_rf4_ta$byClass["Pos Pred Value"]
+
+# Calcular a revocação
+recall_rf4_ta <- matrix_rf4_ta$byClass["Sensitivity"]
+
+# Calcular o F1-Score
+f1_score_rf4_ta <- 2 * (precision_rf4_ta * recall_rf4_ta) / (precision_rf4_ta + recall_rf4_ta)
+
+#Calcular Teste KS
+ks_rf4_ta <- ks.test(pred_rf4_ta, as.numeric(verdadeiro))
+
+# Exibir as métricas
+cat("Precision:", precision_rf4_ta, "\n")
+cat("Recall:", recall_rf4_ta, "\n")
+cat("F1-Score:", f1_score_rf4_ta, "\n")
+cat("Valor do KS:", ks_rf4_ta$statistic, "\n")
+
+
+# Calcular a curva ROC
+roc_rf4_ta <- roc(dados_teste1$churn, pred_rf4_ta)
+roc_rf4_ta 
+
+# Calcular o AUC
+auc_rf4_ta<- auc(roc_rf4_ta)
+auc_rf4_ta
+```
+
+## Gráfico da curva ROC
+
+```{r}
+# Criar um gráfico da curva ROC 
+par(mar = c(5, 5, 4, 2) + 0.1)  # Ajustar as margens
+plot(roc_rf4_ta, col = "blue", main = "Curva ROC", print.thres = T)
+legend("bottomright", legend = c("Random Forest 4 t"), col = c("blue"), lwd = 2)
+
+```
+
+# Resultado Parcial 2
+
+O ponto de corte utilizado foi de 0,4
+
+![](images/1.Dados_Teste_vs_Treino.png)
+
+As variáveis preditoras do modelo Random Forest 4 são:
+
+-   **eqpdays:** Número de dias (idade) do equipamento atual;
+
+-   **months:** Número total de meses de serviço;
+
+-   **change_mou:** Alteração percentual nos minutos mensais de uso em relação à média dos três meses anteriores;
+
+-   **totrev:** Rendimento total;
+
+-   **mou_cvce_Mean:** Média de minutos não arredondados de uso de chamadas de voz concluídas;
+
+-   **avgqty:** Número médio mensal de chamadas ao longo da vida do cliente;
+
+-   **adjmou:** Faturamento ajustado do total de minutos de uso ao longo da vida do cliente;
+
+-   **totmrc_Mean:** Média de cobrança recorrente mensal total;
+
+-   **totmou:** Total de minutos de uso ao longo da vida do cliente;
+
+-   **peak_vce_Mean:** Número médio de chamadas de voz de entrada e saída de pico;
+
+-   **plcd_vce_Mean:** Número médio de tentativas de chamadas de voz realizadas;
+
+-   **complete_Mean:** Número médio de chamadas concluídas;
+
+-   **unan_vce_Mean:** Número médio de chamadas de voz não atendidas;
+
+-   **avg6rev:** Receita média mensal nos seis meses anteriores;
+
+-   **drop_vce_Mean:** Número médio de chamadas de voz perdidas (com falha);
+
+-   **ovrmou_Mean:** Média de minutos excedentes de uso
